@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- A more rounded, classic skull shape -->
+  <path d="M50,15 C 25,15 20,35 20,55 C 20,80 35,90 50,90 C 65,90 80,80 80,55 C 80,35 75,15 50,15 Z" fill="#e0e0e0"/>
+  
+  <!-- Large, simple eye sockets -->
+  <circle cx="38" cy="48" r="12" fill="#000"/>
+  <circle cx="62" cy="48" r="12" fill="#000"/>
+  
+  <!-- Simple triangular nose -->
+  <polygon points="48,62 52,62 50,72" fill="#000"/>
+  
+  <!-- A simple line for the mouth -->
+  <rect x="35" y="80" width="30" height="2" fill="#000"/>
+</svg>

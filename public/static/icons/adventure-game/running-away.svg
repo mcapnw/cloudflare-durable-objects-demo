@@ -1,0 +1,12 @@
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <!-- Body -->
+    <path d="M 50 30 C 45 40, 45 60, 50 70" fill="none" stroke="white" stroke-width="4"/>
+    <!-- Head -->
+    <circle cx="55" cy="25" r="8" fill="white"/>
+    <!-- Arms -->
+    <path d="M 50 45 Q 60 35, 70 45" fill="none" stroke="white" stroke-width="4"/>
+    <path d="M 50 45 Q 40 55, 30 45" fill="none" stroke="white" stroke-width="4"/>
+    <!-- Legs -->
+    <path d="M 50 70 L 40 85" fill="none" stroke="white" stroke-width="4"/>
+    <path d="M 50 70 L 60 85" fill="none" stroke="white" stroke-width="4"/>
+</svg>

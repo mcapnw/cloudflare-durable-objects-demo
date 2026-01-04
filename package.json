@@ -1,0 +1,24 @@
+{
+  "name": "antigravity-project-1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build --mode client && vite build --emptyOutDir=false",
+    "deploy": "npm run build && wrangler pages deploy dist",
+    "preview": "wrangler pages dev dist"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "honox": "^0.1.26",
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240101.0",
+    "@hono/vite-build": "^1.7.0",
+    "@hono/vite-dev-server": "^0.23.0",
+    "@types/three": "^0.182.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "wrangler": "^4.53.0"
+  }
+}

@@ -1,0 +1,12 @@
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <!-- Breastplate -->
+    <path d="M 20 15 L 80 15 L 85 50 L 75 85 L 25 85 L 15 50 Z" fill="#BFC1C2" stroke="#808080" stroke-width="1"/>
+    <path d="M 50 15 L 75 50 L 25 50 Z" fill="#D3D3D3"/>
+
+    <!-- Pauldrons -->
+    <path d="M 15 15 L 30 5 L 40 15 Z" fill="#A9A9A9" stroke="#808080" stroke-width="1"/>
+    <path d="M 85 15 L 70 5 L 60 15 Z" fill="#A9A9A9" stroke="#808080" stroke-width="1"/>
+
+    <!-- Faulds -->
+    <rect x="25" y="85" width="50" height="10" fill="#A9A9A9" stroke="#808080" stroke-width="1"/>
+</svg>

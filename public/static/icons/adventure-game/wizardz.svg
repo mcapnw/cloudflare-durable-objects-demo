@@ -1,0 +1,36 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Main hat cone -->
+  <path d="M50 10 L20 80 L80 80 Z" fill="#4338ca" stroke="#312e81" stroke-width="2"/>
+
+  <!-- Hat brim -->
+  <ellipse cx="50" cy="80" rx="35" ry="8" fill="#1e1b4b" stroke="#0f0f23" stroke-width="1"/>
+
+  <!-- Hat band -->
+  <path d="M25 75 Q50 70 75 75 Q50 78 25 75" fill="#7c3aed" stroke="#5b21b6" stroke-width="1"/>
+
+  <!-- Stars decoration -->
+  <g fill="#fbbf24" stroke="#f59e0b" stroke-width="0.5">
+    <!-- Large star -->
+    <path d="M45 35 L47 42 L54 42 L48.5 46 L50.5 53 L45 49 L39.5 53 L41.5 46 L36 42 L43 42 Z"/>
+
+    <!-- Medium star -->
+    <path d="M60 50 L61.5 55 L66.5 55 L62.5 58 L64 63 L60 60 L56 63 L57.5 58 L53.5 55 L58.5 55 Z"/>
+
+    <!-- Small star -->
+    <path d="M35 55 L36 58 L39 58 L37 60 L38 63 L35 61.5 L32 63 L33 60 L31 58 L34 58 Z"/>
+  </g>
+
+  <!-- Moon crescent -->
+  <path d="M30 25 Q35 20 35 30 Q35 35 30 30 Q25 25 30 25" fill="#e5e7eb" stroke="#d1d5db" stroke-width="0.5"/>
+
+  <!-- Sparkles -->
+  <g fill="#fbbf24" opacity="0.8">
+    <circle cx="25" cy="40" r="1"/>
+    <circle cx="70" cy="30" r="1.5"/>
+    <circle cx="65" cy="65" r="1"/>
+    <circle cx="40" cy="65" r="1"/>
+  </g>
+
+  <!-- Hat tip with bell -->
+  <circle cx="50" cy="10" r="3" fill="#fbbf24" stroke="#f59e0b" stroke-width="1"/>
+</svg>

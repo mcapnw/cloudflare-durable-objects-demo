@@ -1,0 +1,9 @@
+{
+    "general": {
+        "previewFeatures": true
+    },
+    "agent": {
+        "defaultModel": "gemini-3-flash-preview",
+        "fallbackModel": "gemini-3-flash"
+    }
+}

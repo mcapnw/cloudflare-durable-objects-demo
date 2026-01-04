@@ -1,0 +1,73 @@
+Develop a full-stack, real-time multiplayer application using HonoX (TypeScript) for the Cloudflare Pages environment. The application must feature Google OAuth, connect to Cloudflare D1 for user data, and synchronize player state using Cloudflare Durable Objects. The front-end must use three.js for 3D rendering and be optimized for mobile touch input.
+
+### PHASE 1: Project Setup & Core Stack
+1.  **Framework:** Initialize a new HonoX project using the **TypeScript** template suitable for Cloudflare Pages.
+2.  **Dependencies:** Install `hono`, `hono/oauth` (or similar standard OAuth library for Workers), and `three`.
+3.  **Bindings & Configuration (`wrangler.toml`):**
+    * Add a D1 database binding named **`DB`**.
+    * Add a Durable Object namespace binding named **`GAMEROOM_NAMESPACE`** with a specific class name of `GameRoomDurableObject`.
+    * Configure the project for a **Cloudflare Pages/Worker** runtime.
+
+### PHASE 2: Authentication & User Service
+1.  **Google OAuth:** Implement a Google OAuth flow. Define a route (e.g., `/auth/google`) for sign-in and a callback route (`/auth/callback`). The OAuth credentials should be sourced from environment variables.
+2.  **User Data Flow:** Upon successful login:
+    * Check the D1 database (`c.env.DB`) for the user's ID.
+    * If the user is new, insert their Cloudflare User ID and their **Google first name** into a D1 table called `Users`.
+    * Create a secure session cookie that stores the user's ID and first name for subsequent requests.
+3.  **Hono Middleware:** Implement a Hono middleware that checks for this session cookie and redirects unauthenticated users to the login page. The authenticated user's name should be available in the Hono context (`c.env.user.firstName`).
+
+### PHASE 3: Multiplayer Backend (Durable Objects)
+1.  **Durable Object Class:** Define the `GameRoomDurableObject` class. This DO must:
+    * Store and manage a map of **active players** (PlayerID -> { firstName, x, z }).
+    * Handle **WebSocket connections** from the client (the three.js game).
+    * Implement logic to update a player's position based on incoming WebSocket messages.
+    * Broadcast **all** current player positions and names to all connected clients in real-time when any player moves or joins.
+2.  **Hono Routing:** Create a Hono route (e.g., `/ws/game`) that upgrades the HTTP request to a WebSocket and connects the client to the `GameRoomDurableObject` instance using a fixed ID (e.g., a "global room").
+
+### PHASE 4: three.js Game Client
+1.  **Frontend Route:** Create the main HonoX route (`/`) to render an HTML page that includes a single client-side JavaScript file, **`game.js`**.
+2.  **3D Environment:** The **`game.js`** file must use `three.js` to initialize a basic 3D scene including a camera, lighting, and a simple, textured **gray ground plane**.
+3.  **Player Rendering:**
+    * The current user should be rendered as a **simple block** (e.g., blue cube).
+    * Render all other connected players (from the WebSocket updates) as simple blocks (e.g., red cubes).
+    * Display the player's **first name** (received from the DO) centered **above** their respective block in the 3D scene (using a 2D canvas texture or similar method).
+4.  **Mobile Controls:** Implement a **mobile-friendly on-screen joystick** (or simple directional buttons) in the HTML overlay. This UI should trigger movement (forward/backward/rotation) for the player's three.js block and send the new position/rotation to the Durable Object via the WebSocket.
+5.  **Synchronization:** Ensure the client smoothly interpolates or updates the positions of other players based on the real-time data received from the Durable Object.
+
+
+
+Shorter broken up prompt 
+
+
+
+Prompt 2: Implement Google OAuth for HonoX. Upon successful login, save the user's ID and first name into the DB D1 database in a table named Users. Create a Hono middleware to enforce login
+
+
+Optimize realtime for free limits:
+
+1. 🏎️ Minimize the Number of Messages Sent (The Golden Rule)
+Sending fewer messages is the most direct way to save money and stay under free limits.
+A. Delta Compression / Interest Management
+Technique: Instead of broadcasting the full state of the game (all players' locations, rotations, health) every update cycle, only send the "delta"—the difference from the last time a player's data was sent.  
+Application (DO Logic): Your Durable Object should maintain the last known state for every player. When a player sends an update, the DO calculates which fields have changed significantly and only broadcasts those fields to the other players.
+Interest Management: For a large game world, only send data about Player A to Player B if Player A is within B's "interest radius" (e.g., within 50 meters).  
+B. Input/Command Replication (The Pro Approach)
+Technique: Instead of the client sending their raw position (x: 10, y: 5), the client sends the command (move_forward, rotate_left). The authoritative server (your Durable Object) runs the physics/game logic to determine the new position and then broadcasts the result only when necessary.
+Benefit: A single command message (move_forward) is much smaller and less frequent than constant position updates.
+Note: This is more complex because it requires running the game logic authoritatively inside the Durable Object.
+2. 📉 Minimize the Size of Each Message (Data Serialization)
+Since every incoming WebSocket message counts toward your 100,000 daily limit, you need to make the outgoing broadcast messages as small as possible.
+A. Binary Encoding over JSON
+Technique: JSON (which uses human-readable strings like "location", "x") has high overhead. Switch to binary encoding (e.g., using FlatBuffers or MessagePack).
+Benefit: This can reduce the payload size by 50% or more. Binary encoding for a float (a number with a decimal, like a position) might take 4 bytes, while a JSON string might take 10-20 bytes for the key, value, and formatting.
+Application (Durable Object): In your DO, when sending data via the WebSocket send() method, use the ArrayBuffer type instead of JSON strings.
+B. Quantization and Bit Packing
+Technique: Position coordinates in Three.js often use 32-bit floats. If your game world is small (e.g., 1000 \times 1000 units), you can quantize (round) the positions to fewer decimal places, or even convert them to a short integer, saving significant bits per update.
+Example: Instead of sending X=987.65432, you might send X=987.
+3. 🧠 Use Client-Side Prediction (Hiding Latency)
+This technique doesn't directly reduce requests, but it allows you to reduce the required update frequency, which does save on requests.
+Technique (Dead Reckoning): The client predicts where other players will be based on the last data received (e.g., assume they will continue moving in a straight line at the same speed).
+Server Updates: The server (DO) only sends a new position correction when the client's predicted position is significantly wrong (e.g., the player changed direction, stopped, or the lag is too high).
+Benefit: You can reduce the server update rate from 30 times per second down to 5-10 times per second, cutting your message count by over half, while the game still feels smooth to the player.
+
+This application should function based on websocket hibernation.

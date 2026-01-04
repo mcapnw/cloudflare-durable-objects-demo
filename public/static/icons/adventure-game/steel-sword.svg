@@ -1,0 +1,14 @@
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <!-- Blade -->
+    <path d="M 50 5 L 60 70 L 40 70 Z" fill="#E5E4E2" stroke="#BFC1C2" stroke-width="1"/>
+    <path d="M 50 5 L 55 70 L 45 70 Z" fill="#F5F5F5"/>
+
+    <!-- Crossguard -->
+    <path d="M 35 70 L 65 70 L 68 75 L 32 75 Z" fill="#4A4A4A" stroke="#333333" stroke-width="1"/>
+
+    <!-- Hilt -->
+    <path d="M 45 75 L 55 75 L 55 90 L 45 90 Z" fill="#6B6B6B" stroke="#333333" stroke-width="1"/>
+
+    <!-- Pommel -->
+    <circle cx="50" cy="95" r="6" fill="#4A4A4A" stroke="#333333" stroke-width="1"/>
+</svg>

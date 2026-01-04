@@ -1,0 +1,22 @@
+name = "antigravity-do"
+main = "app/do-worker.ts"
+compatibility_date = "2025-01-29"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+DO_SECRET = "f7edacee7d2f83901bb21a33eda643a1a0fc17ae78bac0274c25eaf713b30034"
+
+
+[[d1_databases]]
+binding = "DB"
+database_name = "antigravity-db"
+database_id = "f39459bf-f8b2-447b-a454-2262e3dd49b8"
+
+[[durable_objects.bindings]]
+name = "GAMEROOM_NAMESPACE"
+class_name = "GameRoomDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoomDurableObject"]
+

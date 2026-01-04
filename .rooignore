@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# 3D Assets (Roo can't read these)
+*.glb
+*.gltf
+*.obj
+*.fbx
+*.bin
+
+# Textures and Media
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.mp3
+*.wav
+*.ogg
+
+# Environment and Logs
+.env
+*.log
+.git/
+
+
+# reset 123
+#ok

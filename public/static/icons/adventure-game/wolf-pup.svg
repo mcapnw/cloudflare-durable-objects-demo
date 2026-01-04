@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Body -->
+  <path d="M30,50 C40,30 70,30 80,50 L70,80 L40,80 Z" fill="#a9a9a9"/>
+  <!-- Head -->
+  <path d="M20,50 C30,40 40,40 40,50 C40,60 30,70 20,60 Z" fill="#c0c0c0"/>
+  <!-- Snout -->
+  <path d="M15,55 C20,50 25,50 25,55 Z" fill="#a9a9a9"/>
+  <!-- Ears -->
+  <polygon points="25,40 35,30 35,40" fill="#c0c0c0"/>
+  <polygon points="35,40 45,30 45,40" fill="#c0c0c0"/>
+  <!-- Eyes -->
+  <circle cx="30" cy="50" r="2" fill="#000"/>
+  <!-- Tail -->
+  <path d="M80,50 C90,40 90,60 80,70 Z" fill="#a9a9a9"/>
+</svg>
