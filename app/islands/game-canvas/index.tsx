@@ -4,6 +4,8 @@ import * as Constants from './constants'
 import * as Utils from './utils'
 import * as MeshFactories from './meshFactories'
 import * as UIGenerators from './uiGenerators'
+import * as LobbyManager from './lobbyManager'
+import * as RealmManager from './realmManager'
 
 export default function GameCanvas({ userId, firstName, username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete }: Types.GameCanvasProps) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -26,7 +28,8 @@ export default function GameCanvas({ userId, firstName, username, gender, faceIn
 
 function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, container: HTMLElement, myUserId: string, myFirstName: string, initialUsername?: string, initialGender?: 'male' | 'female', initialFaceIndex?: number, initialCoins: number = 0, initialInventory: string[] = [], tutorialComplete: boolean = false) {
     // Initialize Factories
-    MeshFactories.initFactories(THREE, LOADERS.SkeletonUtils)
+    MeshFactories.initFactories(THREE, LOADERS.SkeletonUtils);
+
 
     const { GLTFLoader, SkeletonUtils } = LOADERS
     const textureLoader = new THREE.TextureLoader()
@@ -41,6 +44,27 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     let coins = initialCoins
     let inventory = initialInventory
     let farmPlotsState: any[] = []
+
+    let isInRealm = false
+    let lobbyState: LobbyManager.LobbyState | null = null
+    let realmState: RealmManager.RealmState | null = null
+
+    // Restore essential state variables
+    let realmWaitModal: HTMLDivElement | null = null
+    let isWaitingForRealm = false
+    let realmPlayers: any[] = []
+    let realmTime = 0
+    let realmTimerLabel: any = null
+    const farmPlotWheat: (any | null)[] = new Array(9).fill(null)
+
+    // UI state variables
+    let isModalOpen = false
+    let isInventoryOpen = false
+    let isShopOpen = false
+    let isScoreboardOpen = false
+    let isCharacterCustomizing = true
+
+
 
     let myPlayerId: string | null = null
     let myX = 0
@@ -66,21 +90,20 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     let wsConnected = false
 
     let isVersionMismatch = false
+    let versionInterval: any = null
     async function checkVersion() {
         try {
             const resp = await fetch('/api/version')
             const data = (await resp.json()) as { version?: string }
             if (data.version && data.version !== Constants.CLIENT_VERSION) {
                 isVersionMismatch = true
-                clearInterval(versionInterval)
+                if (versionInterval) clearInterval(versionInterval)
                 UIGenerators.showUpdateOverlay(data.version)
             }
         } catch (err) {
             console.error('Failed to check version:', err)
         }
     }
-    checkVersion()
-    const versionInterval = setInterval(checkVersion, 30000)
 
     // interaction buttons
     const interactBtn = document.createElement('button')
@@ -103,6 +126,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     // WebSocket vars
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/game`
+    let currentRoomId: string | null = null
+
 
     // Scene setup
     const scene = new THREE.Scene()
@@ -131,7 +156,11 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         display: none;
         border: 2px solid #FFD54F;
         box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        overflow-y: auto;
+        max-height: 80vh;
     `
+    document.body.appendChild(scoreModal)
+
     document.body.appendChild(scoreModal)
 
     // Dragon Damage List UI
@@ -289,37 +318,35 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     const wallE = new THREE.Mesh(wallGeoSide, wallMaterial); wallE.position.set(25, wallHeight / 2, 0); scene.add(wallE)
     const wallW = new THREE.Mesh(wallGeoSide, wallMaterial); wallW.position.set(-25, wallHeight / 2, 0); scene.add(wallW)
 
-    const controlPanel = MeshFactories.createControlPanelMesh()
-    controlPanel.position.set(-22, 0, 22)
-    controlPanel.scale.set(1.5, 1.5, 1.5)
-    scene.add(controlPanel)
-
-    const shop = MeshFactories.createShopMesh(textureLoader)
-    shop.position.set(-18, 0, -18)
-    shop.rotation.y = Math.PI / 4
-    scene.add(shop)
-
-    const farmPlotGroups: any[] = []
-    const farmPlotWheat: (any | null)[] = new Array(9).fill(null)
-    const farmStartX = 11, farmStartZ = -5
-    for (let i = 0; i < 9; i++) {
-        const x = farmStartX + (i % 3) * 5.0
-        const z = farmStartZ + Math.floor(i / 3) * 5.0
-        const plot = MeshFactories.createFarmPlotMesh()
-        plot.position.set(x, 0, z)
-        scene.add(plot)
-        farmPlotGroups.push(plot)
+    function switchToScene(type: 'lobby' | 'realm') {
+        if (type === 'realm') {
+            if (lobbyState) {
+                LobbyManager.cleanupLobby(scene, lobbyState)
+                lobbyState = null
+                sheeps.forEach(s => {
+                    if (s.mesh) scene.remove(s.mesh)
+                    if (s.label) scene.remove(s.label)
+                })
+                sheeps.clear()
+            }
+            if (!realmState) {
+                realmState = RealmManager.setupRealm(scene, THREE)
+                isInRealm = true
+            }
+        } else {
+            if (realmState) {
+                RealmManager.cleanupRealm(scene, THREE)
+                realmState = null
+            }
+            if (!lobbyState) {
+                lobbyState = LobbyManager.setupLobby(scene, THREE, textureLoader, MeshFactories, UIGenerators)
+                isInRealm = false
+            }
+        }
+        updateUIVisibility()
     }
 
-    const controlPanelLabel = UIGenerators.createTextSprite(THREE, 'Obelisk', false, '#000000', 'transparent')
-    controlPanelLabel.position.set(-22, 5.5, 22)
-    scene.add(controlPanelLabel)
-    const shopLabel = UIGenerators.createTextSprite(THREE, 'Store', false, '#000000', 'transparent')
-    shopLabel.position.set(-18, 6, -18)
-    scene.add(shopLabel)
-    const farmLabel = UIGenerators.createTextSprite(THREE, 'Farm', false, '#000000', 'transparent')
-    farmLabel.position.set(16, 5, 0)
-    scene.add(farmLabel)
+
 
     // CHARACTER SCENE
     const charScene = new THREE.Scene()
@@ -451,6 +478,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         params.append('gender', charGender)
         params.append('username', myUsername || '')
         params.append('firstName', myFirstName || '')
+        if (currentRoomId) params.append('room', currentRoomId)
+
 
         ws = new WebSocket(`${wsUrl}?${params.toString()}`)
 
@@ -569,12 +598,84 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 if (data.sheeps) updateSheeps(data.sheeps)
                 if (data.farmPlots) updateFarmPlots(data.farmPlots)
                 if (data.players) data.players.forEach((p: any) => updatePlayer(p, p.id === myPlayerId))
+
+                if (data.realmTime !== undefined) {
+                    realmTime = data.realmTime
+                    let timerEl = document.getElementById('realm-timer')
+                    if (!timerEl) {
+                        timerEl = document.createElement('div')
+                        timerEl.id = 'realm-timer'
+                        timerEl.style.cssText = `
+                            position: fixed; top: 90px; left: 50%; transform: translateX(-50%);
+                            color: #000000; font-family: 'Outfit', 'Inter', system-ui, sans-serif; 
+                            font-size: 20px; font-weight: 400; 
+                            z-index: 10000; text-align: center;
+                            pointer-events: none; white-space: nowrap;
+                        `
+                        document.body.appendChild(timerEl)
+                    }
+                    const minutes = Math.floor(realmTime / 60)
+                    const seconds = realmTime % 60
+                    const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
+                    timerEl.innerText = `Remaining Time in Realm: ${timeStr}`
+                    timerEl.style.display = 'block'
+                } else {
+                    const t = document.getElementById('realm-timer')
+                    if (t) t.style.display = 'none'
+                }
             } else if (data.type === 'pickup_spawned') {
                 updatePickups([...Array.from(pickups.values()), data])
             } else if (data.type === 'weapon_update') {
                 updatePlayer(data, data.id === myPlayerId)
             } else if (data.type === 'error') {
                 if (data.message === 'Not enough coins') showShopError('Not Enough Coins')
+            } else if (data.type === 'realm_lobby_update') {
+                realmPlayers = data.players
+                if (isWaitingForRealm) {
+                    updateRealmWaitModal()
+                }
+            } else if (data.type === 'start_realm') {
+                isWaitingForRealm = false
+                if (realmWaitModal) realmWaitModal.style.display = 'none'
+                updateUIVisibility()
+                // Determine current URL parameters to preserve customization
+                const currentParams = new URL(wsUrl).searchParams // Actually wsUrl is string, constructing from window.location
+                const params = new URLSearchParams(window.location.search)
+                params.set('room', data.realmId)
+
+                // Reconnect to new room
+                if (ws) ws.close()
+                ws = null
+                wsConnected = false
+                isInRealm = true
+                console.log('Joining Realm Instance:', data.realmId)
+
+                // We need to reconstruct the WS URL with the room param
+                // connectWebSocket constructs it from state, so we need to override logic or pass room
+                // Actually connectWebSocket pulls from globals.
+                // Let's modify connectWebSocket signature or handling.
+                // Easier: just append room to global state so next connect uses it? 
+                // No, better to update the connectWebSocket function or pass it as arg. 
+                // But connectWebSocket parses vars.
+                // Let's add a `currentRoomId` var in top scope.
+                currentRoomId = data.realmId
+
+                setTimeout(() => connectWebSocket(true), 500)
+            } else if (data.type === 'realm_init') {
+                isWaitingForRealm = false
+                if (realmWaitModal) realmWaitModal.style.display = 'none'
+                switchToScene('realm')
+                // Disable other UI
+                damageListEl.style.display = 'none'
+            } else if (data.type === 'realm_expired') {
+                currentRoomId = null // Back to lobby
+                switchToScene('lobby')
+                if (ws) ws.close()
+                ws = null
+                wsConnected = false
+                const t = document.getElementById('realm-timer')
+                if (t) t.remove()
+                setTimeout(() => connectWebSocket(true), 500)
             }
         }
     }
@@ -627,6 +728,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             document.addEventListener('mousedown', closeHandler)
             document.addEventListener('touchstart', closeHandler)
         }
+
+
         const counts: { [key: string]: number } = {}
         inventory.forEach((item: string) => counts[item] = (counts[item] || 0) + 1)
         const coinHtml = `
@@ -734,9 +837,10 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
     function updateFarmPlots(plots: any[]) {
         farmPlotsState = plots
+        if (!lobbyState) return
         plots.forEach((plot: any, index: number) => {
-            if (index >= farmPlotGroups.length) return
-            const group = farmPlotGroups[index]
+            if (index >= lobbyState!.farmPlotGroups.length) return
+            const group = lobbyState!.farmPlotGroups[index]
             const growthStage = plot.growthStage || 0
             if (growthStage === 0) {
                 if (farmPlotWheat[index]) {
@@ -986,6 +1090,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 }
                 sheeps.set(s.id, sheep)
             }
+            sheep.mesh.visible = (lobbyState !== null)
             sheep.targetX = s.x
             sheep.targetZ = s.z
             sheep.targetRotation = s.rotation
@@ -998,6 +1103,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 if (s.text) {
                     sheep.label = UIGenerators.createSheepTextSprite(THREE, s.text)
                     scene.add(sheep.label)
+                    sheep.label.visible = (lobbyState !== null)
                 }
                 sheep.lastText = s.text
             }
@@ -1514,9 +1620,17 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         const scoreModal = document.getElementById('score-modal')
         const invModal = document.getElementById('inventory-modal')
         const shopModal = document.getElementById('shop-modal')
-        const isModalOpen = (scoreModal && scoreModal.style.display === 'block') ||
+        const rModal = document.getElementById('realm-wait-modal')
+
+            // Expose for window helpers
+            ; (window as any).updateUIVisibility = updateUIVisibility
+
+        isModalOpen = !!(
+            (scoreModal && scoreModal.style.display === 'block') ||
             (invModal && invModal.style.display === 'block') ||
-            (shopModal && shopModal.style.display === 'block')
+            (shopModal && shopModal.style.display === 'block') ||
+            (rModal && rModal.style.display === 'block')
+        )
 
         if (currentMode === 'character') {
             const selectionCard = document.getElementById('selection-card')
@@ -1658,7 +1772,78 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 }
             }
         }
-    }, { passive: false })
+    }, { passive: false });
+
+
+    // Define global helpers for Realm UI
+    Object.assign(window, {
+        toggleRealmReady: () => {
+            if (interactBtn.innerText === 'JOIN REALM') {
+                isWaitingForRealm = true
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'realm_ready' }))
+            }
+        },
+        leaveRealmLobby: () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'leave_realm_lobby' }))
+            }
+            isWaitingForRealm = false
+            const m = document.getElementById('realm-wait-modal')
+            if (m) m.style.display = 'none'
+            updateUIVisibility()
+        }
+    });
+
+    function updateRealmWaitModal() {
+        if (!realmWaitModal) {
+            realmWaitModal = document.createElement('div')
+            realmWaitModal.id = 'realm-wait-modal'
+            realmWaitModal.style.cssText = `
+                position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.95); color: white; padding: 24px; border-radius: 16px;
+                width: 90%; max-width: 500px; font-family: system-ui, sans-serif; z-index: 200;
+                border: 2px solid #9C27B0; box-shadow: 0 0 30px rgba(156, 39, 176, 0.5);
+                display: none;
+            `
+            document.body.appendChild(realmWaitModal)
+        }
+
+        realmWaitModal.style.display = 'block'
+
+        const myP = realmPlayers.find(p => p.id === myPlayerId)
+        const AmIReady = myP?.ready
+
+        const listHtml = realmPlayers.map(p => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding: 10px; background: rgba(255,255,255,0.05); margin-bottom: 8px; border-radius: 8px;">
+                <div style="font-weight:bold;">${Utils.escapeHtml(p.name || 'Player')}</div>
+                <div style="color: ${p.ready ? '#4CAF50' : '#FFC107'}; font-weight:bold;">${p.ready ? 'READY' : 'WAITING'}</div>
+            </div>
+        `).join('')
+
+        const readyButtonHtml = realmPlayers.length >= 1 ? `
+            <button onclick="window.toggleRealmReady()" style="flex:1; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; font-size: 16px; background: ${AmIReady ? '#C0C0C0' : '#4CAF50'}; color: ${AmIReady ? '#333' : 'white'};">
+                ${AmIReady ? 'Ready ✓' : 'Ready'}
+            </button>
+        ` : ''
+
+        realmWaitModal.innerHTML = `
+            <h2 style="margin-top:0; text-align:center; color: #E1BEE7; margin-bottom: 20px;">Realm Lobby</h2>
+            <div style="margin-bottom: 20px; max-height: 300px; overflow-y: auto;">
+                ${listHtml.length ? listHtml : '<div style="text-align:center; opacity:0.5;">Waiting for players...</div>'}
+            </div>
+            
+             <div style="display:flex; gap: 10px;">
+                ${readyButtonHtml}
+                 <button onclick="window.leaveRealmLobby()" style="padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; cursor: pointer; font-weight:bold;">
+                    LEAVE
+                </button>
+            </div>
+            <div style="text-align:center; margin-top:10px; font-size:12px; opacity:0.6;">Min 2 Players • 30s Duration</div>
+        `
+        updateUIVisibility()
+    }
 
     document.addEventListener('touchend', (e) => {
         for (let i = 0; i < e.changedTouches.length; i++) {
@@ -1751,11 +1936,10 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 mesh.position.set(sp.x, 1, sp.z)
                 scene.add(mesh)
                 if (sp.playerId !== myPlayerId) {
+                    mesh.visible = false
+                    // Also make sure children are hidden if any
                     mesh.traverse((c: any) => {
-                        if (c.isMesh && c.material) {
-                            c.material.transparent = true
-                            c.material.opacity = 0.3
-                        }
+                        if (c.isMesh) c.visible = false
                     })
                 }
                 pickups.set(sp.id, {
@@ -1885,8 +2069,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         }
 
-        if (controlPanel) {
-            controlPanel.children.forEach((child: any) => {
+        if (lobbyState) {
+            lobbyState.controlPanel.children.forEach((child: any) => {
                 if (child.name === 'floatingCylinder') {
                     const phase = child.userData.phase || 0
                     const orbitRadius = child.userData.orbitRadius || 1.2
@@ -2037,7 +2221,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
             totalX += p.x
             totalZ += p.z
-            pickupCount++
+            if (p.playerId === myPlayerId) pickupCount++
 
             if (p.playerId === myPlayerId && !myIsDead) {
                 const dx = p.x - myX
@@ -2055,13 +2239,32 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         if (globalPickupIndicator) {
             if (pickupCount > 0) {
                 globalPickupIndicator.visible = true
-                globalPickupIndicator.position.x = totalX / pickupCount
-                globalPickupIndicator.position.z = totalZ / pickupCount
-                globalPickupIndicator.position.y = 2 + Math.sin(Date.now() * 0.005) * 1.5 // Slower, higher bob
+                // We need to re-calculate average position for ONLY user's pickups
+                let myTotalX = 0
+                let myTotalZ = 0
+                let myCount = 0
+                for (const pv of pickups.values()) {
+                    if (pv.playerId === myPlayerId) {
+                        myTotalX += pv.x
+                        myTotalZ += pv.z
+                        myCount++
+                    }
+                }
+
+                if (myCount > 0) {
+                    globalPickupIndicator.position.x = myTotalX / myCount
+                    globalPickupIndicator.position.z = myTotalZ / myCount
+                    globalPickupIndicator.position.y = 2 + Math.sin(Date.now() * 0.005) * 1.5
+                } else {
+                    globalPickupIndicator.visible = false
+                }
             } else {
                 globalPickupIndicator.visible = false
             }
         }
+
+        // Realm Interaction
+
 
         for (const s of sheeps.values()) {
             s.currentX = Utils.lerp(s.currentX, s.targetX, Constants.LERP_SPEED)
@@ -2080,11 +2283,20 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             if (s.hopPhase > Math.PI * 2) s.hopPhase -= Math.PI * 2
             s.mesh.position.set(s.currentX, hopY, s.currentZ)
             s.mesh.rotation.y = s.currentRotation
+            s.mesh.visible = true // Managers handle removal/add
             if (s.label) {
+                s.label.visible = true
                 s.label.position.set(s.currentX, hopY + 1.8, s.currentZ)
                 const dist = camera.position.distanceTo(s.label.position)
                 const scaleFactor = Math.max(0.1, dist / 12)
                 s.label.scale.set(4 * scaleFactor, 1 * scaleFactor, 1)
+            }
+        }
+        if (lobbyState) {
+            if (lobbyState.realmStructure.userData.portalRing) {
+                lobbyState.realmStructure.userData.portalRing.rotation.z += delta * 2
+                const scale = 1 + Math.sin(now * 0.003) * 0.1
+                lobbyState.realmStructure.userData.portalRing.scale.set(scale, scale, scale)
             }
         }
 
@@ -2266,15 +2478,22 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             let nearShop = false
             let nearPlotIndex = -1
             let nearPanel = false
-            const dShop = Math.hypot(myX - (-18), myZ - (-18))
-            if (dShop < 4) nearShop = true
-            farmPlotGroups.forEach((plot, i) => {
-                const d = Math.hypot(myX - plot.position.x, myZ - plot.position.z)
-                if (d < 2.5) nearPlotIndex = i
-            })
-            const distToPanel = Math.hypot(myX - (-22), myZ - 22)
-            const isDragonDead = !dragon || dragon.isDead
-            if (distToPanel < 5 && isDragonDead) nearPanel = true
+            let nearRealm = false
+
+            if (lobbyState) {
+                const dShop = Math.hypot(myX - (-18), myZ - (-18))
+                if (dShop < 4) nearShop = true
+                lobbyState.farmPlotGroups.forEach((plot, i) => {
+                    const d = Math.hypot(myX - plot.position.x, myZ - plot.position.z)
+                    if (d < 2.5) nearPlotIndex = i
+                })
+                const distToPanel = Math.hypot(myX - (-22), myZ - 22)
+                const isDragonDead = !dragon || dragon.isDead
+                if (distToPanel < 5 && isDragonDead) nearPanel = true
+
+                const dRealm = Math.hypot(myX - 20, myZ - 20)
+                if (dRealm < 5) nearRealm = true
+            }
 
             if (nearShop) {
                 interactBtn.innerText = 'OPEN SHOP'
@@ -2285,6 +2504,20 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 interactBtn.style.color = 'black'
                 interactBtn.style.textShadow = 'none'
                 interactBtn.onclick = () => showShopModal()
+            } else if (nearRealm) {
+                interactBtn.style.display = 'block'
+                interactBtn.innerText = 'JOIN REALM'
+                interactBtn.style.background = '#E1BEE7'
+                interactBtn.style.border = '2px solid black'
+                interactBtn.style.boxShadow = 'inset 0 -3px 0 rgba(0,0,0,0.2)'
+                interactBtn.style.color = 'black'
+                interactBtn.style.textShadow = 'none'
+                interactBtn.onclick = () => {
+                    isWaitingForRealm = true
+                    if (wsConnected && ws) {
+                        ws.send(JSON.stringify({ type: 'join_realm_lobby' }))
+                    }
+                }
             } else if (nearPlotIndex !== -1) {
                 const plotData = farmPlotsState[nearPlotIndex]
                 const stage = plotData?.growthStage || 0
@@ -2388,22 +2621,26 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             const rightZ = -sin
             let nextX = myX + (fwdX * -inputDz + rightX * inputDx) * speed
             let nextZ = myZ + (fwdZ * -inputDz + rightZ * inputDx) * speed
-            const obeliskX = -22, obeliskZ = 22
-            const obeliskRadius = 1.2
-            const distToObelisk = Math.hypot(nextX - obeliskX, nextZ - obeliskZ)
-            if (distToObelisk < obeliskRadius) {
-                const angle = Math.atan2(nextZ - obeliskZ, nextX - obeliskX)
-                nextX = obeliskX + Math.cos(angle) * obeliskRadius
-                nextZ = obeliskZ + Math.sin(angle) * obeliskRadius
+
+            if (lobbyState) {
+                const obeliskX = -22, obeliskZ = 22
+                const obeliskRadius = 1.2
+                const distToObelisk = Math.hypot(nextX - obeliskX, nextZ - obeliskZ)
+                if (distToObelisk < obeliskRadius) {
+                    const angle = Math.atan2(nextZ - obeliskZ, nextX - obeliskX)
+                    nextX = obeliskX + Math.cos(angle) * obeliskRadius
+                    nextZ = obeliskZ + Math.sin(angle) * obeliskRadius
+                }
+                const storeX = -18, storeZ = -18
+                const storeRadius = 2.8
+                const distToStore = Math.hypot(nextX - storeX, nextZ - storeZ)
+                if (distToStore < storeRadius) {
+                    const angle = Math.atan2(nextZ - storeZ, nextX - storeX)
+                    nextX = storeX + Math.cos(angle) * storeRadius
+                    nextZ = storeZ + Math.sin(angle) * storeRadius
+                }
             }
-            const storeX = -18, storeZ = -18
-            const storeRadius = 2.8
-            const distToStore = Math.hypot(nextX - storeX, nextZ - storeZ)
-            if (distToStore < storeRadius) {
-                const angle = Math.atan2(nextZ - storeZ, nextX - storeX)
-                nextX = storeX + Math.cos(angle) * storeRadius
-                nextZ = storeZ + Math.sin(angle) * storeRadius
-            }
+
             if (currentMode === 'game') {
                 myX = nextX
                 myZ = nextZ
@@ -2483,18 +2720,28 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 camera.position.set(camX, camHeight, camZ)
                 camera.lookAt(myX, 4, myZ)
             }
-            [controlPanelLabel, shopLabel, farmLabel].forEach(label => {
-                const dist = camera.position.distanceTo(label.position)
-                const scaleFactor = Math.max(0.1, dist / 12)
-                label.scale.set(4 * scaleFactor, 1 * scaleFactor, 1)
-            })
-            if (currentCountdownLabel) {
-                const dist = camera.position.distanceTo(currentCountdownLabel.position)
-                const scaleFactor = Math.max(0.1, dist / 12)
-                currentCountdownLabel.scale.set(4 * scaleFactor, 1 * scaleFactor, 1)
-            }
-            renderer.render(scene, camera)
+            camera.lookAt(myX, 4, myZ)
         }
+        if (lobbyState) {
+            [lobbyState.controlPanelLabel, lobbyState.shopLabel, lobbyState.farmLabel, lobbyState.realmLabel].forEach(label => {
+                if (label) {
+                    const dist = camera.position.distanceTo(label.position)
+                    const scaleFactor = Math.max(0.1, dist / 12)
+                    label.scale.set(4 * scaleFactor, 1 * scaleFactor, 1)
+                }
+            })
+        }
+        if (currentCountdownLabel) {
+            const dist = camera.position.distanceTo(currentCountdownLabel.position)
+            const scaleFactor = Math.max(0.1, dist / 12)
+            currentCountdownLabel.scale.set(4 * scaleFactor, 1 * scaleFactor, 1)
+        }
+        renderer.render(scene, camera)
     }
+    // Initialization
+    versionInterval = setInterval(checkVersion, 30000)
+    checkVersion()
+    switchToScene('lobby')
+
     animate()
 }

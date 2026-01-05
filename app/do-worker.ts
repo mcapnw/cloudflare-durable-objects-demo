@@ -17,7 +17,9 @@ export default {
         }
 
         // Route to the Durable Object
-        const id = env.GAMEROOM_NAMESPACE.idFromName('global-room')
+        const url = new URL(request.url)
+        const room = url.searchParams.get('room')
+        const id = env.GAMEROOM_NAMESPACE.idFromName(room || 'global-room')
         const stub = env.GAMEROOM_NAMESPACE.get(id)
         return stub.fetch(request)
     }

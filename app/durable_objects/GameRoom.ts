@@ -50,6 +50,12 @@ export class GameRoomDurableObject implements DurableObject {
     gameLoopInterval: number | null = null
     players: Map<string, Player> = new Map() // Central source of truth for all players
 
+    // Realm State
+    waitingPlayers: Map<string, { id: string, name: string, ready: boolean, joinedAt: number }> = new Map()
+    isRealm: boolean = false
+    realmExpiresAt: number = 0
+
+
     constructor(state: DurableObjectState, env: Env) {
         this.state = state
         this.env = env
@@ -112,6 +118,8 @@ export class GameRoomDurableObject implements DurableObject {
         const faceIndex = parseInt(url.searchParams.get('faceIndex') || '0', 10)
         const genderParam = url.searchParams.get('gender')
         const gender: 'male' | 'female' = (genderParam === 'female') ? 'female' : 'male'
+        const room = url.searchParams.get('room')
+
 
         const { 0: client, 1: server } = new WebSocketPair()
 
@@ -179,6 +187,28 @@ export class GameRoomDurableObject implements DurableObject {
 
         this.broadcast({ type: 'join', ...playerData }, id)
 
+        // Realm Init Logic
+        if (room && room !== 'global-room') {
+            this.isRealm = true
+            if (this.realmExpiresAt === 0) {
+                this.realmExpiresAt = Date.now() + 30000 // 30 seconds
+            }
+            // Send time immediately
+            server.send(JSON.stringify({
+                type: 'realm_init',
+                expiresAt: this.realmExpiresAt
+            }))
+        } else {
+            // Send waiting list to new player in global room
+            if (this.waitingPlayers.size > 0) {
+                server.send(JSON.stringify({
+                    type: 'realm_lobby_update',
+                    players: Array.from(this.waitingPlayers.values())
+                }))
+            }
+        }
+
+
         const players = this.getPlayers()
         server.send(JSON.stringify({ type: 'init', players }))
 
@@ -214,6 +244,37 @@ export class GameRoomDurableObject implements DurableObject {
             }
 
             const now = Date.now()
+
+            if (this.isRealm) {
+                if (now > this.realmExpiresAt) {
+                    this.broadcast({ type: 'realm_expired' })
+                    this.players.clear()
+                    this.stopGameLoop()
+                    return
+                }
+                this.broadcast({
+                    type: 'world_update',
+                    players: players,
+                    realmTime: Math.max(0, Math.ceil((this.realmExpiresAt - now) / 1000))
+                })
+                return
+            }
+
+            // Auto-kick from lobby if inactive for > 2 mins
+            let lobbyChanged = false
+            for (const [pid, p] of this.waitingPlayers.entries()) {
+                if (!p.ready && (now - p.joinedAt > 120000)) {
+                    this.waitingPlayers.delete(pid)
+                    lobbyChanged = true
+                }
+            }
+            if (lobbyChanged) {
+                this.broadcast({
+                    type: 'realm_lobby_update',
+                    players: Array.from(this.waitingPlayers.values())
+                })
+            }
+
             updateDragon(this.dragon, players, this.bullets, (msg) => this.broadcast(msg))
             this.bullets = updateBullets(this.bullets, players, this.dragon, now, (msg) => this.broadcast(msg), (id) => this.markPlayerDead(id), (b) => this.handleDragonHit(b))
             updateSheeps(this.sheeps, players, now, 23)
@@ -292,56 +353,81 @@ export class GameRoomDurableObject implements DurableObject {
     handleDragonDeath(killerId: string) {
         this.dragon.isDead = true
         const players = this.getPlayers()
-        const playerIdsGettingStaff = new Set<string>()
 
+        // Distribute drops to EVERYONE who damaged the dragon
         for (const [playerId, dmgData] of this.dragon.damageMap.entries()) {
             const player = players.find(p => p.id === playerId)
-            let nextWeapon = ''
+            let givingStaff = false
+
+            // Check if they need the staff
             if (player) {
                 if (!player.weapon || player.weapon !== 'staff_beginner') {
-                    nextWeapon = 'staff_beginner'
+                    givingStaff = true
                 }
             } else {
-                nextWeapon = 'staff_beginner'
+                // If player left but is in damage map, we assume they might need it, 
+                // but if they are gone we can't really give it to them effectively unless we persist it.
+                // For simplicity, if they aren't here, we generate it but they might miss it if not reconnected.
+                // Actually, if they are not in `players` list, getWebSockets might return empty, so sending won't work.
+                // But let's keep logic consistent.
+                givingStaff = true
             }
 
-            if (nextWeapon) {
-                playerIdsGettingStaff.add(playerId)
+            if (givingStaff) {
                 const pickupId = crypto.randomUUID()
-                // Shift staff slightly so coins don't overlap as much
                 const pickup: Pickup = {
                     id: pickupId,
                     x: this.dragon.x + 1,
                     z: this.dragon.z + 1,
-                    weaponType: nextWeapon,
+                    weaponType: 'staff_beginner',
                     playerId: playerId,
                     createdAt: Date.now()
                 }
                 this.pickups.set(pickupId, pickup)
-                this.broadcast({ type: 'pickup_spawned', ...pickup })
+
+                // Only send to the specific player
+                const sockets = this.state.getWebSockets(playerId)
+                for (const ws of sockets) {
+                    try {
+                        ws.send(JSON.stringify({ type: 'pickup_spawned', ...pickup }))
+                    } catch (e) {
+                        console.error('Failed to send pickup to player', playerId, e)
+                    }
+                }
+            } else {
+                // Give Coins
+                const numCoinPickups = Math.floor(Math.random() * 3) + 3
+                for (let i = 0; i < numCoinPickups; i++) {
+                    const coinAmount = 1 + Math.floor(Math.random() * 2)
+                    const pickupId = crypto.randomUUID()
+                    const offsetX = (Math.random() - 0.5) * 4
+                    const offsetZ = (Math.random() - 0.5) * 4
+                    const pickup: Pickup = {
+                        id: pickupId,
+                        x: this.dragon.x + offsetX,
+                        z: this.dragon.z + offsetZ,
+                        weaponType: 'coin',
+                        coinAmount: coinAmount,
+                        playerId: playerId,
+                        createdAt: Date.now()
+                    }
+                    this.pickups.set(pickupId, pickup)
+
+                    // Only send to the specific player
+                    const sockets = this.state.getWebSockets(playerId)
+                    for (const ws of sockets) {
+                        try {
+                            ws.send(JSON.stringify({ type: 'pickup_spawned', ...pickup }))
+                        } catch (e) {
+                            console.error('Failed to send coin pickup to player', playerId, e)
+                        }
+                    }
+                }
             }
         }
 
-        if (killerId && killerId !== 'dragon' && !playerIdsGettingStaff.has(killerId)) {
-            const numCoinPickups = Math.floor(Math.random() * 3) + 3
-            for (let i = 0; i < numCoinPickups; i++) {
-                const coinAmount = 1 + Math.floor(Math.random() * 2)
-                const pickupId = crypto.randomUUID()
-                const offsetX = (Math.random() - 0.5) * 4
-                const offsetZ = (Math.random() - 0.5) * 4
-                const pickup: Pickup = {
-                    id: pickupId,
-                    x: this.dragon.x + offsetX,
-                    z: this.dragon.z + offsetZ,
-                    weaponType: 'coin',
-                    coinAmount: coinAmount,
-                    playerId: killerId,
-                    createdAt: Date.now()
-                }
-                this.pickups.set(pickupId, pickup)
-                this.broadcast({ type: 'pickup_spawned', ...pickup })
-            }
-
+        // Credit the killer
+        if (killerId && killerId !== 'dragon') {
             this.env.DB.prepare('UPDATE Users SET dragon_kills = dragon_kills + 1 WHERE id = ?')
                 .bind(killerId)
                 .run()
@@ -581,6 +667,56 @@ export class GameRoomDurableObject implements DurableObject {
                         }
                     } catch (e) { console.error('Harvest wheat error:', e) }
                 }
+
+            } else if (data.type === 'join_realm_lobby') {
+                const p = this.getPlayerData(ws)
+                if (p) {
+                    const name = (p.username && p.username.trim() !== '') ? p.username : p.firstName
+                    this.waitingPlayers.set(playerId, { id: playerId, name: name, ready: false, joinedAt: Date.now() })
+                    this.broadcast({
+                        type: 'realm_lobby_update',
+                        players: Array.from(this.waitingPlayers.values())
+                    })
+                }
+            } else if (data.type === 'leave_realm_lobby') {
+                if (this.waitingPlayers.has(playerId)) {
+                    this.waitingPlayers.delete(playerId)
+                    this.broadcast({
+                        type: 'realm_lobby_update',
+                        players: Array.from(this.waitingPlayers.values())
+                    })
+                }
+            } else if (data.type === 'realm_ready') {
+                if (this.waitingPlayers.has(playerId)) {
+                    const entry = this.waitingPlayers.get(playerId)!
+                    entry.ready = !entry.ready
+                    this.waitingPlayers.set(playerId, entry)
+
+                    const allPlayers = Array.from(this.waitingPlayers.values())
+                    this.broadcast({
+                        type: 'realm_lobby_update',
+                        players: allPlayers
+                    })
+
+                    // Check start condition
+                    const readyCount = allPlayers.filter(p => p.ready).length
+                    if (allPlayers.length >= 1 && readyCount === allPlayers.length) {
+                        const newRealmId = crypto.randomUUID()
+                        // Notify ONLY the waiting players
+                        for (const wp of allPlayers) {
+                            const sockets = this.state.getWebSockets(wp.id)
+                            for (const s of sockets) {
+                                s.send(JSON.stringify({ type: 'start_realm', realmId: newRealmId }))
+                            }
+                        }
+                        // Clear waiting room
+                        this.waitingPlayers.clear()
+                        this.broadcast({
+                            type: 'realm_lobby_update',
+                            players: []
+                        })
+                    }
+                }
             }
         } catch (err) { console.error('Error parsing message', err) }
     }
@@ -604,6 +740,15 @@ export class GameRoomDurableObject implements DurableObject {
                     this.players.delete(playerId)
                 }
                 this.broadcast({ type: 'leave', id: playerId })
+
+                // Cleanup waiting room if they disconnect
+                if (this.waitingPlayers.has(playerId)) {
+                    this.waitingPlayers.delete(playerId)
+                    this.broadcast({
+                        type: 'realm_lobby_update',
+                        players: Array.from(this.waitingPlayers.values())
+                    })
+                }
             }
             ws.close()
         }
