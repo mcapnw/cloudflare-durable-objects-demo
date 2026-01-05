@@ -14,3 +14,16 @@ export function getFaceName(filename: string) {
     const name = filename.replace('full_face_', '').replace('.png', '')
     return name.charAt(0).toUpperCase() + name.slice(1)
 }
+
+// Escape HTML to prevent XSS attacks
+export function escapeHtml(str: string): string {
+    if (!str) return ''
+    const escapeMap: { [key: string]: string } = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }
+    return str.replace(/[&<>"']/g, c => escapeMap[c] || c)
+}

@@ -132,7 +132,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         const sorted = [...list].sort((a, b) => b.damage - a.damage)
         const html = sorted.map(p => `
             <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
-                <span style="font-weight:bold; margin-right: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.name}</span>
+                <span style="font-weight:bold; margin-right: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${Utils.escapeHtml(p.name)}</span>
                 <span style="color: #FFD54F;">${p.damage}</span>
             </div>
         `).join('')
@@ -239,8 +239,16 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     const charScene = new THREE.Scene()
     charScene.background = new THREE.Color(0x222222)
     const charCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100)
-    charCamera.position.set(0, 0, 7)
-    charCamera.lookAt(0, 0, 0)
+
+    function updateCharCamera() {
+        const isMobile = window.innerWidth <= 768
+        // Mobile: Shift view up (camera down) and zoom out slightly
+        const targetY = isMobile ? -1.2 : 0
+        const targetZ = isMobile ? 9.0 : 7
+        charCamera.position.set(0, targetY, targetZ)
+        charCamera.lookAt(0, targetY, 0)
+    }
+    updateCharCamera()
     const charAmbient = new THREE.AmbientLight(0xffffff, 1.8)
     charScene.add(charAmbient)
     const charHemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.8)
@@ -384,7 +392,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     const displayName = (s.username && s.username !== 'null' && s.username.trim() !== '') ? s.username : (s.first_name || 'Anonymous')
                     return `
                     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);">
-                        <span>${i + 1}. ${displayName}</span>
+                        <span>${i + 1}. ${Utils.escapeHtml(displayName)}</span>
                         <span style="color:#FFD54F;font-weight:bold;">${s.dragon_kills} Kills | ${s.deaths || 0} Deaths</span>
                     </div>
                 `}).join('')
@@ -1006,69 +1014,133 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         }
     }
 
-    const charOverlay = document.createElement('div')
-    charOverlay.id = 'char-overlay'
-    charOverlay.style.cssText = `
+    // UI Styling
+    const style = document.createElement('style')
+    style.innerHTML = `
+      #selection-card {
         position: fixed;
-        top: 20px;
-        left: 0;
-        width: 100%;
+        background: rgba(0, 0, 0, 0.65);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 24px;
         display: none;
         flex-direction: column;
-        align-items: center;
-        gap: 20px;
-        pointer-events: none;
+        gap: 16px;
         z-index: 100;
-    `
-    document.body.appendChild(charOverlay)
-
-    const charControls = document.createElement('div')
-    charControls.style.cssText = `
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      }
+      @media (min-width: 769px) {
+        #selection-card {
+          right: 60px;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 320px;
+        }
+      }
+      @media (max-width: 768px) {
+        #selection-card {
+          bottom: 30px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 85%;
+          max-width: 380px;
+        }
+      }
+      .card-section { display: flex; flex-direction: column; gap: 8px; }
+      .card-label {
+        color: rgba(255,255,255,0.5);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        font-weight: 700;
+        margin-left: 4px;
+      }
+      .card-input {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        color: white;
+        padding: 14px 16px;
+        font-size: 16px;
+        width: 100%;
+        box-sizing: border-box;
+        font-family: inherit;
+        outline: none;
+        transition: all 0.2s;
+      }
+      .card-input:focus {
+        border-color: #FFD54F;
+        background: rgba(255,255,255,0.1);
+      }
+      .card-btn {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        color: white;
+        padding: 14px 16px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-weight: 500;
+        width: 100%;
+        text-align: left;
         display: flex;
-        gap: 10px;
-        pointer-events: auto;
+        justify-content: space-between;
+        align-items: center;
+        font-family: inherit;
+      }
+      .card-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+      .card-play-btn {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+        border: none;
+        border-radius: 14px;
+        padding: 18px;
+        font-size: 18px;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
+        transition: all 0.2s;
+        width: 100%;
+        text-align: center;
+        margin-top: 8px;
+        font-family: inherit;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .card-play-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(76, 175, 80, 0.5); }
+      .card-play-btn:active { transform: translateY(1px); }
     `
-    charOverlay.appendChild(charControls)
+    document.head.appendChild(style)
+
+    const selectionCard = document.createElement('div')
+    selectionCard.id = 'selection-card'
+    document.body.appendChild(selectionCard)
+
+    // Name Section
+    const nameSection = document.createElement('div')
+    nameSection.className = 'card-section'
+    nameSection.innerHTML = '<span class="card-label">Identity</span>'
+    selectionCard.appendChild(nameSection)
+
+    // Gender Section
+    const genderSection = document.createElement('div')
+    genderSection.className = 'card-section'
+    genderSection.innerHTML = '<span class="card-label">Physique</span>'
+    selectionCard.appendChild(genderSection)
+
+    // Face Section
+    const faceSection = document.createElement('div')
+    faceSection.className = 'card-section'
+    faceSection.innerHTML = '<span class="card-label">Appearance</span>'
+    selectionCard.appendChild(faceSection)
 
     const faceBtn = document.createElement('button')
-    faceBtn.innerText = `Face: ${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}`
-    faceBtn.style.cssText = `
-        position: fixed;
-        bottom: 28%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 10px 20px;
-        font-size: 16px;
-        background: rgba(0,0,0,0.8);
-        color: white;
-        border-radius: 8px;
-        border: 2px solid #FFD54F;
-        font-family: system-ui, sans-serif;
-        cursor: pointer;
-        font-weight: bold;
-        z-index: 100;
-        display: none;
-    `
-    const backBtn = document.createElement('button')
-    backBtn.innerText = 'PLAY'
-    backBtn.style.cssText = `
-        position: fixed;
-        bottom: 40px;
-        left: 50%;
-        transform: translateX(-50%);
-        color: white;
-        background: rgba(76, 175, 80, 0.9);
-        padding: 15px 30px;
-        border-radius: 12px;
-        border: none;
-        cursor: pointer;
-        font-weight: 900;
-        font-size: 18px;
-        pointer-events: auto;
-        z-index: 100;
-        display: none;
-    `
-    document.body.appendChild(backBtn)
+    faceBtn.className = 'card-btn'
+    faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
+    faceSection.appendChild(faceBtn)
 
     function switchToMode(mode: 'game' | 'character' | 'spectate') {
         currentMode = mode
@@ -1129,57 +1201,25 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
     faceBtn.addEventListener('click', () => {
         currentFaceIndex = (currentFaceIndex + 1) % MeshFactories.charFaces.length
-        faceBtn.innerText = `Face: ${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}`
+        faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
         updateCharacterFace()
     })
 
     const usernameInput = document.createElement('input')
     usernameInput.type = 'text'
-    usernameInput.placeholder = 'Enter Username (Max 20)'
+    usernameInput.placeholder = 'Enter Username'
     usernameInput.value = myUsername || myFirstName || ''
-    usernameInput.maxLength = 20
-    usernameInput.style.cssText = `
-        position: fixed;
-        top: 10%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 12px 20px;
-        font-size: 18px;
-        border-radius: 8px;
-        border: 2px solid #FFD54F;
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        text-align: center;
-        font-family: system-ui, sans-serif;
-        z-index: 100;
-        width: 80%;
-        max-width: 300px;
-        display: none;
-    `
+    usernameInput.maxLength = 16
+    usernameInput.className = 'card-input'
+    nameSection.appendChild(usernameInput)
     usernameInput.addEventListener('input', () => {
         usernameInput.value = usernameInput.value.replace(/[^a-zA-Z0-9 ]/g, '')
     })
 
     const playBtn = document.createElement('button')
-    playBtn.innerText = 'PLAY'
-    playBtn.style.cssText = `
-        position: fixed;
-        bottom: 5%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 16px 40px;
-        font-size: 24px;
-        font-weight: bold;
-        border-radius: 12px;
-        border: none;
-        background: #4CAF50;
-        color: white;
-        font-family: system-ui, sans-serif;
-        z-index: 100;
-        cursor: pointer;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-        display: none;
-    `
+    playBtn.innerText = 'ENTER WORLD'
+    playBtn.className = 'card-play-btn'
+    selectionCard.appendChild(playBtn)
     playBtn.addEventListener('click', async () => {
         myUsername = usernameInput.value.trim()
         try {
@@ -1204,29 +1244,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     })
 
     const charGenderBtn = document.createElement('button')
-    charGenderBtn.innerText = `Gender: ${charGender.charAt(0).toUpperCase() + charGender.slice(1)}`
-    charGenderBtn.style.background = charGender === 'male' ? 'rgba(33, 150, 243, 0.8)' : 'rgba(233, 30, 99, 0.8)'
-    charGenderBtn.style.cssText = `
-        position: fixed;
-        bottom: 20%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 10px 20px;
-        font-size: 16px;
-        background: rgba(33, 150, 243, 0.8);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-family: system-ui, sans-serif;
-        cursor: pointer;
-        z-index: 100;
-        display: none;
-    `
+    charGenderBtn.className = 'card-btn'
+    charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${charGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${charGender.toUpperCase()}</span>`
+    genderSection.appendChild(charGenderBtn)
     charGenderBtn.addEventListener('click', () => {
         charGender = charGender === 'male' ? 'female' : 'male'
         myGender = charGender
-        charGenderBtn.innerText = `Gender: ${charGender.charAt(0).toUpperCase() + charGender.slice(1)}`
-        charGenderBtn.style.background = charGender === 'male' ? 'rgba(33, 150, 243, 0.8)' : 'rgba(233, 30, 99, 0.8)'
+        charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${charGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${charGender.toUpperCase()}</span>`
         updateCharacterGender()
     })
 
@@ -1399,10 +1423,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             (shopModal && shopModal.style.display === 'block')
 
         if (currentMode === 'character') {
-            usernameInput.style.display = 'block'
-            playBtn.style.display = 'block'
-            charGenderBtn.style.display = 'block'
-            faceBtn.style.display = 'block'
+            const selectionCard = document.getElementById('selection-card')
+            if (selectionCard) selectionCard.style.display = 'flex'
+
             exitCameraBtn.style.display = 'none'
             damageListEl.style.display = 'none'
             if (scoreBtn) scoreBtn.style.display = 'none'
@@ -1414,10 +1437,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             interactBtn.style.display = 'none'
             if (invBtn) invBtn.style.display = 'none'
         } else if (currentMode === 'spectate') {
-            usernameInput.style.display = 'none'
-            playBtn.style.display = 'none'
-            charGenderBtn.style.display = 'none'
-            faceBtn.style.display = 'none'
+            const selectionCard = document.getElementById('selection-card')
+            if (selectionCard) selectionCard.style.display = 'none'
+
             exitCameraBtn.style.display = 'block'
             damageListEl.style.display = 'none'
             if (scoreBtn) scoreBtn.style.display = 'none'
@@ -1429,10 +1451,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             interactBtn.style.display = 'none'
             if (invBtn) invBtn.style.display = 'none'
         } else {
-            usernameInput.style.display = 'none'
-            playBtn.style.display = 'none'
-            charGenderBtn.style.display = 'none'
-            faceBtn.style.display = 'none'
+            const selectionCard = document.getElementById('selection-card')
+            if (selectionCard) selectionCard.style.display = 'none'
+
             exitCameraBtn.style.display = 'none'
             if (damageListEl.innerHTML.includes('Dragon Damage') && !isModalOpen) damageListEl.style.display = 'block'
             else damageListEl.style.display = 'none'
@@ -1449,10 +1470,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     const appendToUI = () => {
         const uiContainer = document.querySelector('#ui-layer > div')
         if (uiContainer) {
-            document.body.appendChild(usernameInput)
-            document.body.appendChild(playBtn)
-            document.body.appendChild(charGenderBtn)
-            document.body.appendChild(faceBtn)
             updateUIVisibility()
         } else {
             setTimeout(appendToUI, 100)
@@ -1564,6 +1581,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         camera.updateProjectionMatrix()
         charCamera.aspect = window.innerWidth / window.innerHeight
         charCamera.updateProjectionMatrix()
+        updateCharCamera()
         renderer.setSize(window.innerWidth, window.innerHeight)
     })
 

@@ -4,6 +4,19 @@ import { updateDragon } from './game-logic/dragon'
 import { updateBullets } from './game-logic/physics'
 import { updateFarm } from './game-logic/farming'
 
+// Game constants
+const WORLD_BOUNDS = 25
+const SHOOT_COOLDOWN_MS = 1500
+
+// Validation helpers
+function isValidNumber(val: any): val is number {
+    return typeof val === 'number' && isFinite(val) && !isNaN(val)
+}
+
+function clamp(val: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, val))
+}
+
 interface Env {
     GAMEROOM_NAMESPACE: DurableObjectNamespace
     DB: D1Database
@@ -32,6 +45,7 @@ export class GameRoomDurableObject implements DurableObject {
     pickups: Map<string, Pickup> = new Map()
     sheeps: Sheep[] = []
     farmPlots: FarmPlot[] = []
+    playerLastShoot: Map<string, number> = new Map() // Rate limiting for shoot action
 
     gameLoopInterval: number | null = null
 
@@ -201,7 +215,7 @@ export class GameRoomDurableObject implements DurableObject {
             updateDragon(this.dragon, players, this.bullets, (msg) => this.broadcast(msg))
             this.bullets = updateBullets(this.bullets, players, this.dragon, now, (msg) => this.broadcast(msg), (id) => this.markPlayerDead(id), (b) => this.handleDragonHit(b))
             updateSheeps(this.sheeps, players, now, 23)
-            
+
             if (updateFarm(this.farmPlots, now)) {
                 this.state.storage.put('farm_plots', this.farmPlots)
                 this.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
@@ -246,8 +260,8 @@ export class GameRoomDurableObject implements DurableObject {
         data.damage += 1
         this.dragon.damageMap.set(b.ownerId, data)
 
-        this.state.storage.put('dragon_state', { 
-            isDead: this.dragon.health <= 0, 
+        this.state.storage.put('dragon_state', {
+            isDead: this.dragon.health <= 0,
             health: this.dragon.health,
             damageMap: Array.from(this.dragon.damageMap.entries())
         }).catch(e => console.error('Failed to save dragon state:', e))
@@ -340,9 +354,18 @@ export class GameRoomDurableObject implements DurableObject {
             if (data.type === 'move') {
                 const playerData = this.getPlayerData(ws)
                 if (playerData) {
-                    playerData.x = data.x
-                    playerData.z = data.z
-                    playerData.rotation = data.rotation ?? playerData.rotation
+                    // Validate input
+                    if (!isValidNumber(data.x) || !isValidNumber(data.z)) return
+
+                    // Clamp to world bounds
+                    playerData.x = clamp(data.x, -WORLD_BOUNDS, WORLD_BOUNDS)
+                    playerData.z = clamp(data.z, -WORLD_BOUNDS, WORLD_BOUNDS)
+
+                    // Validate and normalize rotation
+                    if (isValidNumber(data.rotation)) {
+                        playerData.rotation = data.rotation % (Math.PI * 2)
+                    }
+
                     this.setPlayerData(ws, playerData)
                     this.broadcast({
                         type: 'update',
@@ -355,6 +378,9 @@ export class GameRoomDurableObject implements DurableObject {
                     }, playerId)
                 }
             } else if (data.type === 'change_gender') {
+                // Validate gender value
+                if (data.gender !== 'male' && data.gender !== 'female') return
+
                 const playerData = this.getPlayerData(ws)
                 if (playerData) {
                     playerData.gender = data.gender
@@ -372,6 +398,14 @@ export class GameRoomDurableObject implements DurableObject {
                 if (this.dragon.isDead) return
                 const playerData = this.getPlayerData(ws)
                 if (!playerData) return
+                if (playerData.isDead) return
+
+                // Server-side rate limiting
+                const now = Date.now()
+                const lastShoot = this.playerLastShoot.get(playerId) || 0
+                if (now - lastShoot < SHOOT_COOLDOWN_MS) return
+                this.playerLastShoot.set(playerId, now)
+
                 const speed = 2.0
                 const rot = playerData.rotation
                 const startDist = 1.0
@@ -384,7 +418,7 @@ export class GameRoomDurableObject implements DurableObject {
                     vx: vx,
                     vz: vz,
                     ownerId: playerId,
-                    createdAt: Date.now(),
+                    createdAt: now,
                     speed: speed
                 })
             } else if (data.type === 'get_scores') {
@@ -585,7 +619,7 @@ export class GameRoomDurableObject implements DurableObject {
         const msg = JSON.stringify(message); const sockets = this.state.getWebSockets()
         for (const ws of sockets) {
             const tags = this.state.getTags(ws); const playerId = tags[0]
-            if (playerId !== excludeId) { try { ws.send(msg) } catch (e) {} }
+            if (playerId !== excludeId) { try { ws.send(msg) } catch (e) { } }
         }
     }
 
