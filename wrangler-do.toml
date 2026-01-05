@@ -3,8 +3,8 @@ main = "app/do-worker.ts"
 compatibility_date = "2025-01-29"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-DO_SECRET = "f7edacee7d2f83901bb21a33eda643a1a0fc17ae78bac0274c25eaf713b30034"
+# DO_SECRET is stored securely via Cloudflare secrets
+# To set: wrangler secret put DO_SECRET -c wrangler-do.toml
 
 
 [[d1_databases]]

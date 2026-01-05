@@ -27,7 +27,7 @@ export const POST = createRoute(async (c) => {
         const updatedUser = { ...user, username, gender, faceIndex }
         setCookie(c, 'user_session', JSON.stringify(updatedUser), {
             path: '/',
-            httpOnly: false, // Set to false so client can read if needed, or keep true for security
+            httpOnly: true, // Protects against XSS - client gets data via server props
             secure: true,
             sameSite: 'Lax',
             maxAge: 60 * 60 * 24 * 7 // 1 week

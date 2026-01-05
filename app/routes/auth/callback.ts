@@ -70,8 +70,9 @@ export const GET = createRoute(async (c) => {
         }
 
         setCookie(c, 'user_session', JSON.stringify(sessionData), {
-            httpOnly: false, // Set to false so client can read if needed
+            httpOnly: true, // Protects against XSS - client gets data via server props
             secure: true,
+            sameSite: 'Lax',
             path: '/',
             maxAge: 60 * 60 * 24 * 7
         })

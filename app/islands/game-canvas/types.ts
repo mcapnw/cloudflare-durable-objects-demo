@@ -26,6 +26,7 @@ export interface PlayerData {
     // Animation parts
     mixer: any
     actions: { [key: string]: any }
+    currentActionName?: string
     // Death state
     isDead: boolean
     deathX?: number
