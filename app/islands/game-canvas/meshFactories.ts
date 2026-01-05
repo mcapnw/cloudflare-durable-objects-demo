@@ -15,13 +15,14 @@ export const charFaces = [
 export let baseCharModel: any = null
 export let baseAnimations: any[] = []
 export let dragHealthMat: any = null
+export let staffTexture: any = null
 
 export function initFactories(_THREE: any, _SkeletonUtils: any) {
     THREE = _THREE
     SkeletonUtils = _SkeletonUtils
-    
+
     const textureLoader = new THREE.TextureLoader()
-    
+
     shirtTextures.male = textureLoader.load('/static/shirt_plaid.png')
     shirtTextures.female = textureLoader.load('/static/shirt_pink.png')
     shirtTextures.male.flipY = false
@@ -35,6 +36,16 @@ export function initFactories(_THREE: any, _SkeletonUtils: any) {
         tex.colorSpace = THREE.SRGBColorSpace
         loadedTextures.set(face, tex)
     })
+
+    staffTexture = textureLoader.load('/static/staff_beginner.png')
+    staffTexture.flipY = false
+    staffTexture.colorSpace = THREE.SRGBColorSpace
+    loadedTextures.set('staff_beginner.png', staffTexture)
+
+    const wonderTex = textureLoader.load('/static/wonder.png')
+    wonderTex.flipY = false
+    wonderTex.colorSpace = THREE.SRGBColorSpace
+    loadedTextures.set('wonder.png', wonderTex)
 
     dragHealthMat = new THREE.MeshBasicMaterial({ color: 0x00FF00, transparent: true, opacity: 1 })
 }
@@ -173,6 +184,35 @@ export function createWeaponMesh(type: string): any {
         const grip = new THREE.Mesh(gripGeo, metalMat)
         grip.position.set(0, -0.15, -0.1)
         group.add(grip)
+    } else if (type === 'staff_beginner') {
+        if (baseCharModel) {
+            const staff = baseCharModel.getObjectByName('staff_beginner')
+            if (staff) {
+                const clonedStaff = SkeletonUtils.clone(staff)
+                clonedStaff.traverse((child: any) => {
+                    child.visible = true
+                    child.frustumCulled = false
+                    if (child.isMesh && child.material && staffTexture) {
+                        child.material = child.material.clone()
+                        child.material.map = staffTexture
+                        child.material.transparent = false
+                        child.material.opacity = 1.0
+                        child.material.needsUpdate = true
+                    }
+                })
+
+                // Force upright orientation (baseline character parts are often tilted)
+                clonedStaff.rotation.set(0, 0, 0)
+
+                // Center the staff to prevent "wobble" during rotation
+                const box = new THREE.Box3().setFromObject(clonedStaff);
+                const center = new THREE.Vector3();
+                box.getCenter(center);
+                clonedStaff.position.sub(center);
+
+                group.add(clonedStaff)
+            }
+        }
     }
 
     return group
@@ -183,38 +223,42 @@ export function createPickupMesh(type: string): any {
 
     const weapon = createWeaponMesh(type)
     if (type === 'staff_beginner') {
-        weapon.scale.set(1.5, 1.5, 1.5)
+        weapon.scale.set(1.8, 1.8, 1.8) // ~60% of original 3.0
     } else {
         weapon.scale.set(3.0, 3.0, 3.0)
     }
     group.add(weapon)
 
-    const ringGeo = new THREE.RingGeometry(0.8, 1.0, 32)
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd54f, side: THREE.DoubleSide, transparent: true, opacity: 0.5 })
-    const ring = new THREE.Mesh(ringGeo, ringMat)
-    ring.rotation.x = Math.PI / 2
-    group.add(ring)
+    // Gold rings and individual arrows removed for cleaner look
+    return group
+}
 
+export function createGlobalIndicatorMesh(): any {
     const arrowGroup = new THREE.Group()
-    arrowGroup.name = 'arrow'
+    arrowGroup.name = 'globalPickupIndicator'
 
     const arrowColor = 0xff0000
-    const arrowMat = new THREE.MeshStandardMaterial({ color: arrowColor, emissive: arrowColor, emissiveIntensity: 0.5 })
+    const arrowMat = new THREE.MeshStandardMaterial({
+        color: arrowColor,
+        emissive: arrowColor,
+        emissiveIntensity: 1.0,
+        transparent: true,
+        opacity: 0.9
+    })
 
-    const headGeo = new THREE.ConeGeometry(0.3, 0.6, 16)
+    // 3x larger than previous individual arrows
+    const headGeo = new THREE.ConeGeometry(0.9, 1.8, 16)
     const head = new THREE.Mesh(headGeo, arrowMat)
     head.rotation.x = Math.PI
-    head.position.y = 1.5
+    head.position.y = 8.4 // Lowered 30% (from 12.0)
     arrowGroup.add(head)
 
-    const shaftGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.6, 16)
+    const shaftGeo = new THREE.CylinderGeometry(0.3, 0.3, 2.4, 16)
     const shaft = new THREE.Mesh(shaftGeo, arrowMat)
-    shaft.position.y = 2.1
+    shaft.position.y = 10.6 // Lowered to maintain gap (from 14.2)
     arrowGroup.add(shaft)
 
-    group.add(arrowGroup)
-
-    return group
+    return arrowGroup
 }
 
 export function createSheepMesh(): any {
@@ -646,7 +690,7 @@ export function spawnFragments(x: number, y: number, z: number, color: number): 
     for (let i = 0; i < count; i++) {
         const mesh = new THREE.Mesh(geo, mat)
         mesh.position.set(x, y, z)
-        
+
         newFragments.push({
             mesh,
             velocity: {

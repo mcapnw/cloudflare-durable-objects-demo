@@ -19,8 +19,8 @@ export default createRoute(async (c) => {
                     <style>
                         {`
                         .hud-btn {
-                            background: transparent;
-                            border: none;
+                            background: rgba(255, 255, 255, 0.1);
+                            border: 2px solid #000;
                             cursor: pointer;
                             display: flex;
                             align-items: center;
@@ -33,8 +33,9 @@ export default createRoute(async (c) => {
                             border-radius: 12px;
                             outline: none;
                             transition: transform 0.1s, filter 0.1s;
-                            box-shadow: none;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                             position: relative;
+                            box-sizing: border-box;
                         }
                         .hud-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
                         .hud-btn:active { transform: translateY(1px); }
@@ -73,6 +74,7 @@ export default createRoute(async (c) => {
                 faceIndex={(dbUser as any)?.face_index ?? sessionUser?.faceIndex}
                 initialCoins={coins}
                 initialInventory={inventory}
+                tutorialComplete={!!(dbUser as any)?.tutorial_complete}
             />
         </div>,
         { title: 'Antigravity - Game' }

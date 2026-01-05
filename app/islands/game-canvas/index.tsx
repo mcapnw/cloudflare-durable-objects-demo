@@ -5,7 +5,7 @@ import * as Utils from './utils'
 import * as MeshFactories from './meshFactories'
 import * as UIGenerators from './uiGenerators'
 
-export default function GameCanvas({ userId, firstName, username, gender, faceIndex, initialCoins, initialInventory }: Types.GameCanvasProps) {
+export default function GameCanvas({ userId, firstName, username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete }: Types.GameCanvasProps) {
     const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -15,7 +15,7 @@ export default function GameCanvas({ userId, firstName, username, gender, faceIn
             import('three/examples/jsm/loaders/GLTFLoader.js'),
             import('three/examples/jsm/utils/SkeletonUtils.js')
         ]).then(([THREE, { GLTFLoader }, SkeletonUtils]) => {
-            initGame(THREE, { GLTFLoader, SkeletonUtils }, containerRef.current!, userId || 'anonymous', firstName || 'Player', username, gender, faceIndex, initialCoins, initialInventory)
+            initGame(THREE, { GLTFLoader, SkeletonUtils }, containerRef.current!, userId || 'anonymous', firstName || 'Player', username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete)
         })
     }, [])
 
@@ -24,7 +24,7 @@ export default function GameCanvas({ userId, firstName, username, gender, faceIn
     )
 }
 
-function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, container: HTMLElement, myUserId: string, myFirstName: string, initialUsername?: string, initialGender?: 'male' | 'female', initialFaceIndex?: number, initialCoins: number = 0, initialInventory: string[] = []) {
+function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, container: HTMLElement, myUserId: string, myFirstName: string, initialUsername?: string, initialGender?: 'male' | 'female', initialFaceIndex?: number, initialCoins: number = 0, initialInventory: string[] = [], tutorialComplete: boolean = false) {
     // Initialize Factories
     MeshFactories.initFactories(THREE, LOADERS.SkeletonUtils)
 
@@ -32,7 +32,39 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     const textureLoader = new THREE.TextureLoader()
     const gltfLoader = new GLTFLoader()
 
-    // Version Check
+    // State Variables (Moved to top to avoid ReferenceError/TDZ issues)
+    const players = new Map<string, Types.PlayerData>()
+    const pickups = new Map<string, Types.PickupData>()
+    let dragon: Types.DragonData | null = null
+    const sheeps = new Map<string, Types.SheepData>()
+    let globalPickupIndicator: any = null
+    let coins = initialCoins
+    let inventory = initialInventory
+    let farmPlotsState: any[] = []
+
+    let myPlayerId: string | null = null
+    let myX = 0
+    let myZ = 0
+    let myRotation = 0
+    let myIsDead = false
+
+    let lastAnimateTime = Date.now()
+    let lastModalCloseTime = 0
+    let lastFireTime = 0
+
+    const activeTouches = new Map<number, Types.TouchState>()
+    let joystickDeltaX = 0
+    let joystickDeltaY = 0
+
+    let currentMode: 'game' | 'character' | 'spectate' | 'congratulations' = 'character'
+    let tempFaceOverride: string | null = null
+    let myUsername = initialUsername || ''
+    let myGender: 'male' | 'female' = initialGender || 'male'
+    let tutorialStarted = tutorialComplete
+
+    let ws: WebSocket | null = null
+    let wsConnected = false
+
     let isVersionMismatch = false
     async function checkVersion() {
         try {
@@ -65,21 +97,20 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     document.body.appendChild(interactBtn)
 
     // Scene Modes
-    let currentMode: 'game' | 'character' | 'spectate' = 'character'
     let spectateRotationOffset = 0
-    let myUsername = initialUsername || ''
-    let myGender: 'male' | 'female' = initialGender || 'male'
+    let currentCountdownLabel: any = null
 
     // WebSocket vars
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/game`
-    let ws: WebSocket | null = null
-    let wsConnected = false
-    let currentCountdownLabel: any = null
 
     // Scene setup
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x87ceeb)
+
+    globalPickupIndicator = MeshFactories.createGlobalIndicatorMesh()
+    globalPickupIndicator.visible = false
+    scene.add(globalPickupIndicator)
 
     // Scoreboard UI
     const scoreModal = document.createElement('div')
@@ -108,7 +139,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     damageListEl.id = 'dragon-damage-list'
     damageListEl.style.cssText = `
         position: fixed;
-        top: 60px;
+        top: 100px;
         left: 20px;
         background: rgba(0, 0, 0, 0.6);
         color: white;
@@ -124,8 +155,63 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     `
     document.body.appendChild(damageListEl)
 
+    // Congratulations Modal UI
+    const congratsModal = document.createElement('div')
+    congratsModal.id = 'congrats-modal'
+    congratsModal.style.cssText = `
+        position: fixed;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 24px;
+        border-radius: 24px;
+        width: 90%;
+        max-width: 400px;
+        font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+        z-index: 1000;
+        display: none;
+        border: 3px solid #FFD54F;
+        box-shadow: 0 0 30px rgba(255, 213, 79, 0.3);
+        text-align: center;
+        backdrop-filter: blur(8px);
+    `
+    congratsModal.innerHTML = `
+        <h1 style="margin-top:0; color: #FFD54F; font-size: 24px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px;">Congratulations!</h1>
+        <p style="font-size: 16px; margin: 12px 0; line-height: 1.4; color: #FFF;">You earned the <span style="color: #4CAF50; font-weight: bold; font-size: 18px;">Beginner's Staff</span></p>
+        <button id="accept-congrats-btn" style="
+            background: #FFD54F;
+            color: #000;
+            border: none;
+            padding: 10px 32px;
+            font-size: 16px;
+            font-weight: 800;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+            text-transform: uppercase;
+            margin-top: 8px;
+        ">Accept</button>
+    `
+    document.body.appendChild(congratsModal)
+
+    const acceptCongratsBtn = congratsModal.querySelector('#accept-congrats-btn') as HTMLButtonElement
+    if (acceptCongratsBtn) {
+        acceptCongratsBtn.addEventListener('mouseenter', () => { acceptCongratsBtn.style.background = '#FFCA28'; acceptCongratsBtn.style.transform = 'scale(1.05)' })
+        acceptCongratsBtn.addEventListener('mouseleave', () => { acceptCongratsBtn.style.background = '#FFD54F'; acceptCongratsBtn.style.transform = 'scale(1)' })
+        acceptCongratsBtn.addEventListener('click', () => {
+            currentMode = 'game'
+            tempFaceOverride = null
+            updateCharacterFace()
+            congratsModal.style.display = 'none'
+            updateUIVisibility()
+        })
+    }
+
     function updateDamageList(list: { name: string, damage: number }[]) {
         if (!list || list.length === 0) {
+            damageListEl.innerHTML = ''
             damageListEl.style.display = 'none'
             return
         }
@@ -293,20 +379,38 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     })
 
     function updateCharacterFace() {
-        if (!charModel) return
-        const faceName = MeshFactories.charFaces[currentFaceIndex]
+        const faceName = tempFaceOverride || MeshFactories.charFaces[currentFaceIndex]
         const texture = MeshFactories.loadedTextures.get(faceName)
         if (!texture) return
-        charModel.traverse((child: any) => {
-            if (child.isMesh && child.material) {
-                if (child.name === 'custom_head_mesh' || child.material.name === 'full_face.001' || child.name === 'head' || child.name === 'head_1') {
-                    child.material.map = texture
-                    child.material.needsUpdate = true
-                    child.material.color.setHex(0xffffff)
-                    child.frustumCulled = false
+
+        if (charModel) {
+            charModel.traverse((child: any) => {
+                if (child.isMesh && child.material) {
+                    if (child.name === 'custom_head_mesh' || child.material.name === 'full_face.001' || child.name === 'head' || child.name === 'head_1') {
+                        child.material.map = texture
+                        child.material.needsUpdate = true
+                        child.material.color.setHex(0xffffff)
+                        child.frustumCulled = false
+                    }
                 }
+            })
+        }
+
+        if (myPlayerId) {
+            const p = players.get(myPlayerId)
+            if (p && p.mesh) {
+                p.mesh.traverse((child: any) => {
+                    if (child.isMesh && child.material) {
+                        if (child.name === 'custom_head_mesh' || child.material.name === 'full_face.001' || child.name === 'head' || child.name === 'head_1') {
+                            child.material.map = texture
+                            child.material.needsUpdate = true
+                            child.material.color.setHex(0xffffff)
+                            child.frustumCulled = false
+                        }
+                    }
+                })
             }
-        })
+        }
     }
 
     function updateCharacterGender() {
@@ -320,24 +424,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         })
     }
-
-    const players = new Map<string, Types.PlayerData>()
-    const pickups = new Map<string, Types.PickupData>()
-    let dragon: Types.DragonData | null = null
-    const sheeps = new Map<string, Types.SheepData>()
-    let coins = initialCoins
-    let inventory = initialInventory
-    let farmPlotsState: any[] = []
-
-    let myPlayerId: string | null = null
-    let myX = 0
-    let myZ = 0
-    let myRotation = 0
-    let myIsDead = false
-
-    let lastAnimateTime = Date.now()
-    let lastModalCloseTime = 0
-    let lastFireTime = 0
 
     const reconnectOverlay = document.createElement('div')
     reconnectOverlay.id = 'reconnect-overlay'
@@ -424,6 +510,12 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 updatePlayer({ ...data, firstName: data.firstName || myFirstName, username: data.username || myUsername }, true)
                 if (data.farmPlots) updateFarmPlots(data.farmPlots)
                 if (data.dragon) updateDragonState(data.dragon)
+
+                // Trigger Tutorial if needed
+                if (!tutorialStarted) {
+                    tutorialStarted = true
+                    import('./tutorial').then(m => m.startTutorial())
+                }
             } else if (data.type === 'init') {
                 data.players.forEach((p: any) => updatePlayer(p, p.id === myPlayerId))
             } else if (data.type === 'join') {
@@ -789,6 +881,14 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             playerData.targetZ = data.z
             playerData.targetRotation = data.rotation ?? playerData.targetRotation
         }
+
+        if (isMe && weaponChanged && data.weapon === 'staff_beginner') {
+            currentMode = 'congratulations'
+            tempFaceOverride = 'wonder.png'
+            updateCharacterFace()
+            if (congratsModal) congratsModal.style.display = 'block'
+            updateUIVisibility()
+        }
     }
 
     function updateDragonState(data: any) {
@@ -1142,7 +1242,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
     faceSection.appendChild(faceBtn)
 
-    function switchToMode(mode: 'game' | 'character' | 'spectate') {
+    function switchToMode(mode: 'game' | 'character' | 'spectate' | 'congratulations') {
         currentMode = mode
         if (mode === 'character') {
             if (ws) {
@@ -1253,10 +1353,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${charGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${charGender.toUpperCase()}</span>`
         updateCharacterGender()
     })
-
-    const activeTouches = new Map<number, Types.TouchState>()
-    let joystickDeltaX = 0
-    let joystickDeltaY = 0
 
     const joystickContainer = document.createElement('div')
     joystickContainer.id = 'joystick-container'
@@ -1436,6 +1532,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             spawnBtn.style.display = 'none'
             interactBtn.style.display = 'none'
             if (invBtn) invBtn.style.display = 'none'
+            if (congratsModal) congratsModal.style.display = 'none'
         } else if (currentMode === 'spectate') {
             const selectionCard = document.getElementById('selection-card')
             if (selectionCard) selectionCard.style.display = 'none'
@@ -1450,12 +1547,28 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             spawnBtn.style.display = 'none'
             interactBtn.style.display = 'none'
             if (invBtn) invBtn.style.display = 'none'
+            if (congratsModal) congratsModal.style.display = 'none'
+        } else if (currentMode === 'congratulations') {
+            const selectionCard = document.getElementById('selection-card')
+            if (selectionCard) selectionCard.style.display = 'none'
+
+            exitCameraBtn.style.display = 'none'
+            damageListEl.style.display = 'none'
+            if (scoreBtn) scoreBtn.style.display = 'none'
+            if (charNavBtn) charNavBtn.style.display = 'none'
+            if (cameraNavBtn) cameraNavBtn.style.display = 'none'
+            shootBtn.style.display = 'none'
+            joystickContainer.style.display = 'none'
+            spawnBtn.style.display = 'none'
+            interactBtn.style.display = 'none'
+            if (invBtn) invBtn.style.display = 'none'
+            if (congratsModal) congratsModal.style.display = 'block'
         } else {
             const selectionCard = document.getElementById('selection-card')
             if (selectionCard) selectionCard.style.display = 'none'
 
             exitCameraBtn.style.display = 'none'
-            if (damageListEl.innerHTML.includes('Dragon Damage') && !isModalOpen) damageListEl.style.display = 'block'
+            if (dragon && !dragon.isDead && damageListEl.innerHTML.includes('Dragon Damage') && !isModalOpen) damageListEl.style.display = 'block'
             else damageListEl.style.display = 'none'
             if (scoreBtn) scoreBtn.style.display = isModalOpen ? 'none' : 'block'
             if (charNavBtn) charNavBtn.style.display = isModalOpen ? 'none' : 'block'
@@ -1464,6 +1577,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             joystickContainer.style.display = (isModalOpen || myIsDead) ? 'none' : 'block'
             interactBtn.style.display = (isModalOpen || myIsDead) ? 'none' : interactBtn.style.display
             if (invBtn) invBtn.style.display = isModalOpen ? 'none' : 'block'
+            if (congratsModal) congratsModal.style.display = 'none'
         }
     }
 
@@ -1903,12 +2017,19 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         }
 
+        let totalX = 0
+        let totalZ = 0
+        let pickupCount = 0
+
         for (const [id, p] of pickups.entries()) {
-            p.mesh.rotation.y += 0.05
+            p.mesh.rotation.y += 0.05 * (delta * 60)
             const bob = Math.sin(Date.now() * 0.005) * 0.2
             p.mesh.position.y = 1 + bob
-            const arrow = p.mesh.getObjectByName('arrow')
-            if (arrow) arrow.position.y = Math.sin(Date.now() * 0.01) * 0.3
+
+            totalX += p.x
+            totalZ += p.z
+            pickupCount++
+
             if (p.playerId === myPlayerId && !myIsDead) {
                 const dx = p.x - myX
                 const dz = p.z - myZ
@@ -1919,6 +2040,17 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         pickups.delete(p.id)
                     }
                 }
+            }
+        }
+
+        if (globalPickupIndicator) {
+            if (pickupCount > 0) {
+                globalPickupIndicator.visible = true
+                globalPickupIndicator.position.x = totalX / pickupCount
+                globalPickupIndicator.position.z = totalZ / pickupCount
+                globalPickupIndicator.position.y = 2 + Math.sin(Date.now() * 0.005) * 1.5 // Slower, higher bob
+            } else {
+                globalPickupIndicator.visible = false
             }
         }
 
@@ -2326,6 +2458,14 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 const camZ = myZ + Math.cos(angle) * specDist
                 camera.position.set(camX, specHeight, camZ)
                 camera.lookAt(myX, 1.2, myZ)
+            } else if (currentMode === 'congratulations') {
+                const specDist = 3.5
+                const specHeight = 1.6
+                const angle = myRotation + Math.PI
+                const camX = myX + Math.sin(angle) * specDist
+                const camZ = myZ + Math.cos(angle) * specDist
+                camera.position.set(camX, specHeight, camZ)
+                camera.lookAt(myX, 1.4, myZ)
             } else {
                 const camDistance = 7.5
                 const camHeight = 5

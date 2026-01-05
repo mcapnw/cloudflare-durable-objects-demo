@@ -223,6 +223,13 @@ export class GameRoomDurableObject implements DurableObject {
                 this.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
             }
 
+            // Cleanup old pickups (60 seconds)
+            for (const [id, p] of this.pickups.entries()) {
+                if (now - p.createdAt > 60000) {
+                    this.pickups.delete(id)
+                }
+            }
+
             this.broadcast({
                 type: 'world_update',
                 dragon: {
@@ -285,6 +292,7 @@ export class GameRoomDurableObject implements DurableObject {
     handleDragonDeath(killerId: string) {
         this.dragon.isDead = true
         const players = this.getPlayers()
+        const playerIdsGettingStaff = new Set<string>()
 
         for (const [playerId, dmgData] of this.dragon.damageMap.entries()) {
             const player = players.find(p => p.id === playerId)
@@ -298,11 +306,13 @@ export class GameRoomDurableObject implements DurableObject {
             }
 
             if (nextWeapon) {
+                playerIdsGettingStaff.add(playerId)
                 const pickupId = crypto.randomUUID()
+                // Shift staff slightly so coins don't overlap as much
                 const pickup: Pickup = {
                     id: pickupId,
-                    x: this.dragon.x,
-                    z: this.dragon.z,
+                    x: this.dragon.x + 1,
+                    z: this.dragon.z + 1,
                     weaponType: nextWeapon,
                     playerId: playerId,
                     createdAt: Date.now()
@@ -312,7 +322,7 @@ export class GameRoomDurableObject implements DurableObject {
             }
         }
 
-        if (killerId && killerId !== 'dragon') {
+        if (killerId && killerId !== 'dragon' && !playerIdsGettingStaff.has(killerId)) {
             const numCoinPickups = Math.floor(Math.random() * 3) + 3
             for (let i = 0; i < numCoinPickups; i++) {
                 const coinAmount = 1 + Math.floor(Math.random() * 2)
@@ -443,7 +453,20 @@ export class GameRoomDurableObject implements DurableObject {
                             playerData.weapon = pickup.weaponType
                             this.setPlayerData(ws, playerData)
                             this.pickups.delete(data.pickupId)
-                            this.env.DB.prepare('UPDATE Users SET weapon = ? WHERE id = ?').bind(pickup.weaponType, playerId).run().catch(e => console.error('Failed to update weapon:', e))
+
+                            if (pickup.weaponType === 'staff_beginner') {
+                                this.env.DB.prepare('UPDATE Users SET coins = coins + 10, weapon = ? WHERE id = ?')
+                                    .bind(pickup.weaponType, playerId)
+                                    .run()
+                                    .catch(e => console.error('Failed to update weapon/coins:', e))
+                                ws.send(JSON.stringify({ type: 'coins_earned', amount: 10 }))
+                            } else {
+                                this.env.DB.prepare('UPDATE Users SET weapon = ? WHERE id = ?')
+                                    .bind(pickup.weaponType, playerId)
+                                    .run()
+                                    .catch(e => console.error('Failed to update weapon:', e))
+                            }
+
                             this.broadcast({ type: 'weapon_update', id: playerId, weapon: pickup.weaponType })
                         }
                     }

@@ -6,6 +6,7 @@ export interface GameCanvasProps {
     faceIndex?: number
     initialCoins?: number
     initialInventory?: string[]
+    tutorialComplete?: boolean
 }
 
 export interface PlayerData {

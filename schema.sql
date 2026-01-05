@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS Users (
     gender TEXT DEFAULT 'male',
     username TEXT DEFAULT NULL,
     coins INTEGER DEFAULT 0,
-    inventory TEXT DEFAULT '[]'
+    inventory TEXT DEFAULT '[]',
+    tutorial_complete INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS GameConfig (
