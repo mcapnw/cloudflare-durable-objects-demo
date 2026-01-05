@@ -48,6 +48,7 @@ export class GameRoomDurableObject implements DurableObject {
     playerLastShoot: Map<string, number> = new Map() // Rate limiting for shoot action
 
     gameLoopInterval: number | null = null
+    players: Map<string, Player> = new Map() // Central source of truth for all players
 
     constructor(state: DurableObjectState, env: Env) {
         this.state = state
@@ -151,6 +152,7 @@ export class GameRoomDurableObject implements DurableObject {
             weapon: dbFound ? dbWeapon : (savedLoc?.weapon || null)
         }
 
+        this.players.set(id, playerData)
         this.setPlayerData(server, playerData)
 
         const dragonDamage = this.dragon.damageMap.get(id)
@@ -366,7 +368,10 @@ export class GameRoomDurableObject implements DurableObject {
                         playerData.rotation = data.rotation % (Math.PI * 2)
                     }
 
+                    // Update centralized map
+                    this.players.set(playerId, playerData)
                     this.setPlayerData(ws, playerData)
+
                     this.broadcast({
                         type: 'update',
                         id: playerId,
@@ -563,15 +568,23 @@ export class GameRoomDurableObject implements DurableObject {
             const allSockets = this.state.getWebSockets(playerId)
             const otherSockets = allSockets.filter(s => s !== ws)
             if (otherSockets.length === 0) {
-                const playerData = this.getPlayerData(ws)
+                const playerData = this.players.get(playerId)
                 if (playerData) {
-                    await this.state.storage.put(`player_loc_${playerId}`, { x: playerData.x, z: playerData.z, rotation: playerData.rotation, gender: playerData.gender, faceIndex: playerData.faceIndex, weapon: playerData.weapon })
+                    await this.state.storage.put(`player_loc_${playerId}`, {
+                        x: playerData.x,
+                        z: playerData.z,
+                        rotation: playerData.rotation,
+                        gender: playerData.gender,
+                        faceIndex: playerData.faceIndex,
+                        weapon: playerData.weapon
+                    })
+                    this.players.delete(playerId)
                 }
                 this.broadcast({ type: 'leave', id: playerId })
             }
             ws.close()
         }
-        if (this.getPlayers().length === 0) this.stopGameLoop()
+        if (this.players.size === 0) this.stopGameLoop()
     }
 
     async webSocketError(ws: WebSocket, error: unknown) {
@@ -580,33 +593,40 @@ export class GameRoomDurableObject implements DurableObject {
             const allSockets = this.state.getWebSockets(playerId)
             const otherSockets = allSockets.filter(s => s !== ws)
             if (otherSockets.length === 0) {
-                const playerData = this.getPlayerData(ws)
+                const playerData = this.players.get(playerId)
                 if (playerData) {
-                    await this.state.storage.put(`player_loc_${playerId}`, { x: playerData.x, z: playerData.z, rotation: playerData.rotation, gender: playerData.gender, faceIndex: playerData.faceIndex, weapon: playerData.weapon })
+                    await this.state.storage.put(`player_loc_${playerId}`, {
+                        x: playerData.x,
+                        z: playerData.z,
+                        rotation: playerData.rotation,
+                        gender: playerData.gender,
+                        faceIndex: playerData.faceIndex,
+                        weapon: playerData.weapon
+                    })
+                    this.players.delete(playerId)
                 }
                 this.broadcast({ type: 'leave', id: playerId })
             }
         }
         ws.close()
-        if (this.getPlayers().length === 0) this.stopGameLoop()
+        if (this.players.size === 0) this.stopGameLoop()
     }
 
     getPlayers(): Player[] {
-        const sockets = this.state.getWebSockets()
-        const playersMap = new Map<string, Player>()
-        for (const ws of sockets) {
-            const playerData = this.getPlayerData(ws)
-            if (playerData) playersMap.set(playerData.id, playerData)
-        }
-        return Array.from(playersMap.values())
+        return Array.from(this.players.values())
     }
 
     getPlayerData(ws: WebSocket): Player | null {
         try {
+            const tags = this.state.getTags(ws)
+            const playerId = tags[0]
+            if (playerId && this.players.has(playerId)) {
+                return this.players.get(playerId)!
+            }
+
             const data = (ws as any).deserializeAttachment?.() as Player | null ?? (ws as any).attachment as Player | null
             if (data) return data
-            const tags = this.state.getTags(ws)
-            if (tags[0]) return { id: tags[0], firstName: 'Player', username: null, x: 0, z: 0, rotation: 0, gender: 'male', faceIndex: 0, isDead: false, deathTime: 0, weapon: null }
+            if (playerId) return { id: playerId, firstName: 'Player', username: null, x: 0, z: 0, rotation: 0, gender: 'male', faceIndex: 0, isDead: false, deathTime: 0, weapon: null }
             return null
         } catch (e) { console.error('Error in getPlayerData:', e); return null }
     }
