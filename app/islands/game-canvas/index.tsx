@@ -1795,7 +1795,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             return
         }
 
-        const speed = 0.15
+        const speed = Constants.PLAYER_SPEED * delta
         let inputDx = 0
         let inputDz = 0
 
@@ -1809,12 +1809,21 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 if (keys['ArrowLeft'] || keys['KeyA']) inputDx -= 1
                 if (keys['ArrowRight'] || keys['KeyD']) inputDx += 1
             }
-            if (keys['KeyQ'] && !isActingNow) myRotation += 0.03
-            if (keys['KeyE'] && !isActingNow) myRotation -= 0.03
+            if (keys['KeyQ'] && !isActingNow) myRotation += 2.0 * delta
+            if (keys['KeyE'] && !isActingNow) myRotation -= 2.0 * delta
 
             if (!myIsDead && !isActingNow && (Math.abs(joystickDeltaX) > 5 || Math.abs(joystickDeltaY) > 5)) {
+                // Joystick input is already somewhat proportional, but let's normalize it to 0-1 range based on max radius (50)
                 inputDx = joystickDeltaX / 50
                 inputDz = joystickDeltaY / 50
+            }
+
+            // Normalize input vector if magnitude > 1 to prevent diagonal speed boost
+            // and ensure keyboard (1,1) isn't faster than (0,1)
+            const len = Math.hypot(inputDx, inputDz)
+            if (len > 1.0) {
+                inputDx /= len
+                inputDz /= len
             }
         }
 
@@ -2248,7 +2257,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         }
 
-        const speedVal = 0.15
+        const speedVal = Constants.PLAYER_SPEED * delta
         const isTargetedByDragon = dragon && !dragon.isDead && dragon.targetId === myPlayerId
         const localPlayer = myPlayerId ? players.get(myPlayerId) : null
         const isActing = localPlayer?.isActing || false
