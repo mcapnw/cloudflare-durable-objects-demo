@@ -461,7 +461,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         z-index: 9999; font-family: system-ui, sans-serif; pointer-events: auto;
     `
     const reconnectText = document.createElement('div')
-    reconnectText.style.cssText = 'font-size: 24px; font-weight: bold; color: #FFD54F;'
+    reconnectText.style.cssText = 'font-size: 24px; font-weight: bold; color: #FFD54F; text-align: center; padding: 0 40px; max-width: 600px;'
     reconnectOverlay.appendChild(reconnectText)
     document.body.appendChild(reconnectOverlay)
 
@@ -488,6 +488,11 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             console.log('WebSocket connected')
             reconnectOverlay.style.display = 'none'
             checkVersion()
+
+            // Query if player has an active realm session
+            if (!currentRoomId && ws) {
+                ws.send(JSON.stringify({ type: 'get_player_realm' }))
+            }
         }
         ws.onclose = () => {
             wsConnected = false
@@ -619,9 +624,51 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
                     timerEl.innerText = `Remaining Time in Realm: ${timeStr}`
                     timerEl.style.display = 'block'
+
+                    // Instance ID display
+                    let instanceEl = document.getElementById('realm-instance-id')
+                    if (!instanceEl) {
+                        instanceEl = document.createElement('div')
+                        instanceEl.id = 'realm-instance-id'
+                        instanceEl.style.cssText = `
+                            position: fixed; top: 115px; left: 50%; transform: translateX(-50%);
+                            color: #666666; font-family: 'Outfit', 'Inter', system-ui, sans-serif; 
+                            font-size: 12px; font-weight: 400; 
+                            z-index: 10000; text-align: center;
+                            pointer-events: none; white-space: nowrap;
+                        `
+                        document.body.appendChild(instanceEl)
+                    }
+                    if (currentRoomId) {
+                        instanceEl.innerText = `Instance ${currentRoomId}`
+                        instanceEl.style.display = 'block'
+                    }
+
+                    // Active realms count display
+                    if (data.activeRealmCount !== undefined) {
+                        let activeCountEl = document.getElementById('active-realms-count')
+                        if (!activeCountEl) {
+                            activeCountEl = document.createElement('div')
+                            activeCountEl.id = 'active-realms-count'
+                            activeCountEl.style.cssText = `
+                                position: fixed; top: 135px; left: 50%; transform: translateX(-50%);
+                                color: #888888; font-family: 'Outfit', 'Inter', system-ui, sans-serif; 
+                                font-size: 11px; font-weight: 400; 
+                                z-index: 10000; text-align: center;
+                                pointer-events: none; white-space: nowrap;
+                            `
+                            document.body.appendChild(activeCountEl)
+                        }
+                        activeCountEl.innerText = `Active Realms: ${data.activeRealmCount}`
+                        activeCountEl.style.display = 'block'
+                    }
                 } else {
                     const t = document.getElementById('realm-timer')
                     if (t) t.style.display = 'none'
+                    const i = document.getElementById('realm-instance-id')
+                    if (i) i.style.display = 'none'
+                    const a = document.getElementById('active-realms-count')
+                    if (a) a.style.display = 'none'
                 }
             } else if (data.type === 'pickup_spawned') {
                 updatePickups([...Array.from(pickups.values()), data])
@@ -659,6 +706,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 // But connectWebSocket parses vars.
                 // Let's add a `currentRoomId` var in top scope.
                 currentRoomId = data.realmId
+                clearAllPlayers() // Ensure clean slate for new room
 
                 setTimeout(() => connectWebSocket(true), 500)
             } else if (data.type === 'realm_init') {
@@ -675,7 +723,28 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 wsConnected = false
                 const t = document.getElementById('realm-timer')
                 if (t) t.remove()
+                const i = document.getElementById('realm-instance-id')
+                if (i) i.remove()
+                const a = document.getElementById('active-realms-count')
+                if (a) a.remove()
+                clearAllPlayers() // Ensure clean slate for lobby
                 setTimeout(() => connectWebSocket(true), 500)
+            } else if (data.type === 'player_realm_info') {
+                // Response to get_player_realm query
+                if (data.realmId && currentMode === 'character') {
+                    // Player has an active realm! Reconnect them
+                    console.log('Reconnecting to active realm:', data.realmId)
+                    currentRoomId = data.realmId
+                    isInRealm = true
+                    // Skip character screen and go straight to game
+                    currentMode = 'game'
+                    updateUIVisibility()
+                    // Close and reconnect with the realm ID
+                    if (ws) ws.close()
+                    ws = null
+                    wsConnected = false
+                    setTimeout(() => connectWebSocket(true), 500)
+                }
             }
         }
     }
@@ -1117,6 +1186,17 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             scene.remove(playerData.label)
             players.delete(id)
         }
+    }
+
+    function clearAllPlayers() {
+        players.forEach((p, id) => {
+            if (p.mesh) scene.remove(p.mesh)
+            if (p.label) scene.remove(p.label)
+            if (p.weaponMesh) scene.remove(p.weaponMesh)
+        })
+        players.clear()
+        // Ensure my player data is cleared too so we fetch fresh
+        // actually myPlayerData is a subset of players usually, but we keep myPlayerId
     }
 
     function handlePlayerDeath(playerId: string, firstName: string, username?: string | null) {

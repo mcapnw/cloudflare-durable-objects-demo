@@ -54,6 +54,8 @@ export class GameRoomDurableObject implements DurableObject {
     waitingPlayers: Map<string, { id: string, name: string, ready: boolean, joinedAt: number }> = new Map()
     isRealm: boolean = false
     realmExpiresAt: number = 0
+    activeRealms: Map<string, number> = new Map() // Track active realm IDs with expiry timestamps (only used in global room)
+    playerRealmMap: Map<string, { realmId: string, expiresAt: number }> = new Map() // Track which players are in which realms (only used in global room)
 
 
     constructor(state: DurableObjectState, env: Env) {
@@ -160,6 +162,61 @@ export class GameRoomDurableObject implements DurableObject {
             weapon: dbFound ? dbWeapon : (savedLoc?.weapon || null)
         }
 
+        // Realm Init Logic - BEFORE welcome message
+        if (room && room !== 'global-room') {
+            this.isRealm = true
+            if (this.realmExpiresAt === 0) {
+                this.realmExpiresAt = Date.now() + 30000 // 30 seconds
+            }
+
+            // Randomize player spawn location in realm
+            const spawnRadius = 20 // Spawn within 20 units
+            const randomAngle = Math.random() * Math.PI * 2
+            const randomDistance = Math.random() * spawnRadius
+            playerData.x = Math.cos(randomAngle) * randomDistance
+            playerData.z = Math.sin(randomAngle) * randomDistance
+            playerData.rotation = Math.random() * Math.PI * 2
+
+            // Load active realm count from storage for display
+            await this.loadActiveRealmsCount()
+        } else {
+            // Load active realms from storage (global room only)
+            this.state.storage.get<[string, number][]>('active_realms').then(realms => {
+                if (realms) {
+                    this.activeRealms = new Map(realms)
+                    // Clean up expired realms
+                    const now = Date.now()
+                    for (const [realmId, expiresAt] of this.activeRealms.entries()) {
+                        if (now > expiresAt) {
+                            this.activeRealms.delete(realmId)
+                        }
+                    }
+                    if (realms.length !== this.activeRealms.size) {
+                        this.state.storage.put('active_realms', Array.from(this.activeRealms.entries()))
+                            .catch(e => console.error('Failed to update active realms:', e))
+                    }
+                }
+            }).catch(e => console.error('Failed to load active realms:', e))
+
+            // Load player-realm mapping
+            this.state.storage.get<[string, { realmId: string, expiresAt: number }][]>('player_realms').then(mapping => {
+                if (mapping) {
+                    this.playerRealmMap = new Map(mapping)
+                    // Clean up expired mappings
+                    const now = Date.now()
+                    for (const [playerId, data] of this.playerRealmMap.entries()) {
+                        if (now > data.expiresAt) {
+                            this.playerRealmMap.delete(playerId)
+                        }
+                    }
+                    if (mapping.length !== this.playerRealmMap.size) {
+                        this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
+                            .catch(e => console.error('Failed to update player realms:', e))
+                    }
+                }
+            }).catch(e => console.error('Failed to load player realms:', e))
+        }
+
         this.players.set(id, playerData)
         this.setPlayerData(server, playerData)
 
@@ -187,12 +244,8 @@ export class GameRoomDurableObject implements DurableObject {
 
         this.broadcast({ type: 'join', ...playerData }, id)
 
-        // Realm Init Logic
+        // Send realm-specific messages
         if (room && room !== 'global-room') {
-            this.isRealm = true
-            if (this.realmExpiresAt === 0) {
-                this.realmExpiresAt = Date.now() + 30000 // 30 seconds
-            }
             // Send time immediately
             server.send(JSON.stringify({
                 type: 'realm_init',
@@ -235,6 +288,19 @@ export class GameRoomDurableObject implements DurableObject {
         }
     }
 
+    async loadActiveRealmsCount() {
+        try {
+            const realms = await this.state.storage.get<[string, number][]>('active_realms')
+            if (realms) {
+                const now = Date.now()
+                // Count only non-expired realms
+                this.activeRealms = new Map(realms.filter(([_, expiresAt]) => now <= expiresAt))
+            }
+        } catch (e) {
+            console.error('Failed to load active realms count:', e)
+        }
+    }
+
     updateGame() {
         try {
             const players = this.getPlayers()
@@ -250,12 +316,20 @@ export class GameRoomDurableObject implements DurableObject {
                     this.broadcast({ type: 'realm_expired' })
                     this.players.clear()
                     this.stopGameLoop()
+                    // Note: Realm cleanup happens when all players disconnect
                     return
                 }
+
+                // Periodically refresh active realm count from storage
+                if (Math.random() < 0.1) { // 10% chance each tick (~10 times per second)
+                    this.loadActiveRealmsCount()
+                }
+
                 this.broadcast({
                     type: 'world_update',
                     players: players,
-                    realmTime: Math.max(0, Math.ceil((this.realmExpiresAt - now) / 1000))
+                    realmTime: Math.max(0, Math.ceil((this.realmExpiresAt - now) / 1000)),
+                    activeRealmCount: this.activeRealms.size
                 })
                 return
             }
@@ -268,6 +342,20 @@ export class GameRoomDurableObject implements DurableObject {
                     lobbyChanged = true
                 }
             }
+
+            // Clean up expired realms
+            let realmsChanged = false
+            for (const [realmId, expiresAt] of this.activeRealms.entries()) {
+                if (now > expiresAt) {
+                    this.activeRealms.delete(realmId)
+                    realmsChanged = true
+                }
+            }
+            if (realmsChanged) {
+                this.state.storage.put('active_realms', Array.from(this.activeRealms.entries()))
+                    .catch(e => console.error('Failed to update active realms:', e))
+            }
+
             if (lobbyChanged) {
                 this.broadcast({
                     type: 'realm_lobby_update',
@@ -306,7 +394,8 @@ export class GameRoomDurableObject implements DurableObject {
                 pickups: Array.from(this.pickups.values()),
                 sheeps: this.sheeps,
                 farmPlots: this.farmPlots,
-                players: players
+                players: players,
+                activeRealmCount: this.activeRealms.size
             })
         } catch (e) {
             console.error('CRITICAL: Error in updateGame loop:', e)
@@ -702,6 +791,20 @@ export class GameRoomDurableObject implements DurableObject {
                     const readyCount = allPlayers.filter(p => p.ready).length
                     if (allPlayers.length >= 1 && readyCount === allPlayers.length) {
                         const newRealmId = crypto.randomUUID()
+                        const realmExpiresAt = Date.now() + 30000 // 30 seconds
+
+                        // Track new realm instance with expiry time
+                        this.activeRealms.set(newRealmId, realmExpiresAt)
+                        this.state.storage.put('active_realms', Array.from(this.activeRealms.entries()))
+                            .catch(e => console.error('Failed to save active realms:', e))
+
+                        // Track players entering this realm
+                        for (const wp of allPlayers) {
+                            this.playerRealmMap.set(wp.id, { realmId: newRealmId, expiresAt: realmExpiresAt })
+                        }
+                        this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
+                            .catch(e => console.error('Failed to save player realms:', e))
+
                         // Notify ONLY the waiting players
                         for (const wp of allPlayers) {
                             const sockets = this.state.getWebSockets(wp.id)
@@ -716,6 +819,27 @@ export class GameRoomDurableObject implements DurableObject {
                             players: []
                         })
                     }
+                }
+            } else if (data.type === 'get_player_realm') {
+                // Query if this player has an active realm session
+                const realmData = this.playerRealmMap.get(playerId)
+                if (realmData && Date.now() < realmData.expiresAt) {
+                    ws.send(JSON.stringify({
+                        type: 'player_realm_info',
+                        realmId: realmData.realmId,
+                        expiresAt: realmData.expiresAt
+                    }))
+                } else {
+                    // No active realm or expired
+                    if (realmData) {
+                        this.playerRealmMap.delete(playerId)
+                        this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
+                            .catch(e => console.error('Failed to update player realms:', e))
+                    }
+                    ws.send(JSON.stringify({
+                        type: 'player_realm_info',
+                        realmId: null
+                    }))
                 }
             }
         } catch (err) { console.error('Error parsing message', err) }
