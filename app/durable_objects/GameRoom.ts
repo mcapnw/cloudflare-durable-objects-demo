@@ -109,11 +109,48 @@ export class GameRoomDurableObject implements DurableObject {
     }
 
     async fetch(request: Request) {
+        const url = new URL(request.url)
+
+        // Internal API for inter-DO communication (no WebSocket upgrade needed)
+        if (url.pathname === '/internal/stats') {
+            // Clean up expired realms first
+            const now = Date.now()
+            for (const [realmId, expiresAt] of this.activeRealms.entries()) {
+                if (now > expiresAt) {
+                    this.activeRealms.delete(realmId)
+                }
+            }
+            return new Response(JSON.stringify({
+                activeRealmCount: this.activeRealms.size
+            }), { headers: { 'Content-Type': 'application/json' } })
+        }
+
+        if (url.pathname === '/internal/player-realm') {
+            const playerId = url.searchParams.get('playerId')
+            if (!playerId) {
+                return new Response(JSON.stringify({ error: 'playerId required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+            }
+            const realmData = this.playerRealmMap.get(playerId)
+            if (realmData && Date.now() < realmData.expiresAt) {
+                return new Response(JSON.stringify({
+                    realmId: realmData.realmId,
+                    expiresAt: realmData.expiresAt
+                }), { headers: { 'Content-Type': 'application/json' } })
+            } else {
+                // Clean up if expired
+                if (realmData) {
+                    this.playerRealmMap.delete(playerId)
+                    this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
+                        .catch(e => console.error('Failed to update player realms:', e))
+                }
+                return new Response(JSON.stringify({ realmId: null }), { headers: { 'Content-Type': 'application/json' } })
+            }
+        }
+
         if (request.headers.get('Upgrade') !== 'websocket') {
             return new Response('Expected Upgrade: websocket', { status: 426 })
         }
 
-        const url = new URL(request.url)
         const usernameParam = url.searchParams.get('username') || null
         const firstNameParam = url.searchParams.get('firstName') || url.searchParams.get('name') || 'Player'
         const id = url.searchParams.get('id') || crypto.randomUUID()
@@ -290,14 +327,19 @@ export class GameRoomDurableObject implements DurableObject {
 
     async loadActiveRealmsCount() {
         try {
-            const realms = await this.state.storage.get<[string, number][]>('active_realms')
-            if (realms) {
-                const now = Date.now()
-                // Count only non-expired realms
-                this.activeRealms = new Map(realms.filter(([_, expiresAt]) => now <= expiresAt))
+            // Fetch from Global Room DO (not local storage which is isolated)
+            const globalId = this.env.GAMEROOM_NAMESPACE.idFromName('global-room')
+            const globalStub = this.env.GAMEROOM_NAMESPACE.get(globalId)
+            const response = await globalStub.fetch('http://internal/internal/stats')
+            const stats = await response.json() as { activeRealmCount: number }
+            // Store count locally for quick access in broadcasts
+            // We don't need the full Map, just the count
+            this.activeRealms.clear()
+            for (let i = 0; i < stats.activeRealmCount; i++) {
+                this.activeRealms.set(`placeholder_${i}`, 0) // Dummy entries to match count
             }
         } catch (e) {
-            console.error('Failed to load active realms count:', e)
+            console.error('Failed to load active realms count from global room:', e)
         }
     }
 
@@ -822,6 +864,16 @@ export class GameRoomDurableObject implements DurableObject {
                 }
             } else if (data.type === 'get_player_realm') {
                 // Query if this player has an active realm session
+                // Load fresh from storage to avoid race condition
+                try {
+                    const mapping = await this.state.storage.get<[string, { realmId: string, expiresAt: number }][]>('player_realms')
+                    if (mapping) {
+                        this.playerRealmMap = new Map(mapping)
+                    }
+                } catch (e) {
+                    console.error('Failed to load player realms:', e)
+                }
+
                 const realmData = this.playerRealmMap.get(playerId)
                 if (realmData && Date.now() < realmData.expiresAt) {
                     ws.send(JSON.stringify({

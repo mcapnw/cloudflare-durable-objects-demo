@@ -465,9 +465,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     reconnectOverlay.appendChild(reconnectText)
     document.body.appendChild(reconnectOverlay)
 
-    function connectWebSocket(isInitial: boolean = false) {
+    function connectWebSocket(isInitial: boolean = false, bypassCharacterCheck: boolean = false) {
         if (isVersionMismatch) return
-        if (currentMode === 'character') return
+        if (currentMode === 'character' && !bypassCharacterCheck) return
         if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
 
         reconnectText.innerText = isInitial ? 'Connecting...' : 'Attempting to re-establish connection...'
@@ -731,6 +731,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 setTimeout(() => connectWebSocket(true), 500)
             } else if (data.type === 'player_realm_info') {
                 // Response to get_player_realm query
+                console.log('Received player_realm_info:', data, 'currentMode:', currentMode)
                 if (data.realmId && currentMode === 'character') {
                     // Player has an active realm! Reconnect them
                     console.log('Reconnecting to active realm:', data.realmId)
@@ -2822,6 +2823,10 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     versionInterval = setInterval(checkVersion, 30000)
     checkVersion()
     switchToScene('lobby')
+
+    // Check for active realm BEFORE showing character screen
+    // This allows reconnection to realms if player refreshes mid-game
+    connectWebSocket(true, true)
 
     animate()
 }
