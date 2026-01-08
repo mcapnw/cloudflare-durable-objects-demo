@@ -14,6 +14,7 @@ import * as MeshFactories from './meshFactories'
 export interface FarmingUIConfig {
     interactBtn: HTMLButtonElement
     onSendMessage: (msg: any) => void
+    setJoystickVisible: (visible: boolean) => void
 }
 
 export class FarmingUI {
@@ -29,7 +30,8 @@ export class FarmingUI {
     updateFarmPlots(
         plots: any[],
         lobbyState: any,
-        farmPlotWheat: (any | null)[]
+        farmPlotWheat: (any | null)[],
+        players: Map<string, any>
     ): void {
         if (!lobbyState) return
 
@@ -40,7 +42,12 @@ export class FarmingUI {
 
             if (growthStage === 0) {
                 // Remove wheat if plot is empty
-                if (farmPlotWheat[index]) {
+                // Remove wheat if plot is empty, UNLESS someone is currently harvesting it
+                const isBeingHarvested = Array.from(players.values()).some(
+                    p => p.isActing && p.actionType === 'harvesting' && p.actingPlotId === index
+                )
+
+                if (farmPlotWheat[index] && !isBeingHarvested) {
                     group.remove(farmPlotWheat[index])
                     farmPlotWheat[index] = null
                 }
@@ -218,14 +225,18 @@ export class FarmingUI {
         this.setInteractButton(`${actionText}...`, '#9CA3AF', 'white', false)
 
 
-        // Send action to server
-        const serverType = type === 'planting' ? 'plant_seeds' :
-            (type === 'watering' ? 'water_wheat' : 'harvest_wheat')
-        this.config.onSendMessage({ type: serverType, plotId })
+        // Send start signal first
+        this.config.onSendMessage({ type: 'start_farming', action: type, plotId })
+        this.config.setJoystickVisible(false)
 
-        // Reset action after 2 seconds
+        // Wait 4 seconds then finalize
         setTimeout(() => {
             const currentP = players.get(myPlayerId!)
+            // Send finalization message
+            const serverType = type === 'planting' ? 'plant_seeds' :
+                (type === 'watering' ? 'water_wheat' : 'harvest_wheat')
+            this.config.onSendMessage({ type: serverType, plotId })
+
             if (currentP && currentP.isActing && currentP.actionType === type) {
                 currentP.isActing = false
                 currentP.actionType = null
@@ -248,8 +259,9 @@ export class FarmingUI {
                 })
 
                 updateUIVisibility()
+                this.config.setJoystickVisible(true)
             }
-        }, 2000)
+        }, 4000)
     }
 
     /**
@@ -263,6 +275,10 @@ export class FarmingUI {
                 if (child.name === 'staff_beginner') child.visible = false
             })
 
+            // Calculate arm bobbing
+            const now = Date.now()
+            const bob = Math.sin(now * 0.0075) * 0.5 // Speed halved (was 0.015)
+
             // Create temporary tool mesh if needed
             if (!playerData.temporaryToolMesh) {
                 let tool: any
@@ -275,7 +291,7 @@ export class FarmingUI {
 
                 const handBone = playerData.mesh.getObjectByName('leftHand')
                 if (handBone) {
-                    tool.rotation.set(0, -Math.PI / 2, Math.PI / 2)
+                    tool.rotation.set(0, Math.PI / 2, Math.PI / 2)
                     handBone.add(tool)
                 } else {
                     tool.position.set(-0.5, 1.5, 0.5)
@@ -284,9 +300,40 @@ export class FarmingUI {
                 playerData.temporaryToolMesh = tool
             }
 
-            // Animate water can
-            if (playerData.actionType === 'watering' && playerData.temporaryToolMesh) {
-                playerData.temporaryToolMesh.rotation.x = -Math.PI / 4
+            // Animate tool and "arm" (rotation)
+            if (playerData.temporaryToolMesh) {
+                // Find arm bone for "whole arm swing"
+                // Try common names: mixamorigLeftArm, LeftArm, arm.L, etc.
+                const armBone = playerData.mesh.getObjectByName('mixamorigLeftArm') ||
+                    playerData.mesh.getObjectByName('LeftArm') ||
+                    playerData.mesh.getObjectByName('arm_l')
+
+                if (armBone) {
+                    // Swing arm forward and backward (Pitch on X usually)
+                    // Bob range -0.5 to 0.5. 
+                    // Arm needs to swing forward (negative X?) and back.
+                    // Let's bias it forward slightly for farming.
+                    armBone.rotation.x += bob * 0.8
+                } else {
+                    // Fallback to hand rotation if arm not found
+                    const handBone = playerData.mesh.getObjectByName('leftHand')
+                    if (handBone) {
+                        handBone.rotation.z += bob * 0.5
+                    }
+                }
+
+                // Also rotate the tool itself slightly for extra effect
+                if (playerData.actionType === 'watering') {
+                    // "Move it up by 45 degree" -> Was -PI/4 (down), now 0 (level), user wants UP 45?
+                    // "Up by 45 degree" -> If level is 0, Up is +PI/4? 
+                    // Original was -PI/4 (down). Previous step removed it (0).
+                    // If user wants "up by 45 degrees" relative to "level", that's PI/4.
+                    playerData.temporaryToolMesh.rotation.x = Math.PI / 4 + bob * 0.2
+                } else if (playerData.actionType === 'planting' || playerData.actionType === 'harvesting') {
+                    // "Point downward at a 45 degree angle" -> Set to -PI/4
+                    // Digging/Cutting motion
+                    playerData.temporaryToolMesh.rotation.x = -Math.PI / 4 + bob * 0.5
+                }
             }
         } else {
             // Restore weapon visibility
@@ -317,13 +364,9 @@ export class FarmingUI {
     ): void {
         farmPlotWheat.forEach((group, index) => {
             if (group && group.userData.stage === 3) {
-                // Check if anyone is harvesting this plot
-                const isBeingHarvested = Array.from(players.values()).some(
-                    p => p.isActing && p.actionType === 'harvesting' && p.actingPlotId === index
-                )
-
-                const intensity = isBeingHarvested ? 0.3 : 0.05
-                const speedMult = isBeingHarvested ? 4 : 1
+                // Determine sway intensity - just normal wind, no extra thrashing during harvest
+                const intensity = 0.05
+                const speedMult = 1
 
                 group.children.forEach((stalkContainer: any) => {
                     const phase = stalkContainer.userData.phase || 0

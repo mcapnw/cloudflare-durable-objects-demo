@@ -150,6 +150,8 @@ export class MessageHandler {
                         }
                     } catch (e) { console.error('Buy item error:', e) }
                 }
+            } else if (data.type === 'start_farming') {
+                this.gameRoom.farmManager.startFarming(ws, playerId, data.action, data.plotId)
             } else if (data.type === 'plant_seeds') {
                 this.gameRoom.farmManager.plantSeeds(ws, playerId, data.plotId)
             } else if (data.type === 'water_wheat') {

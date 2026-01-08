@@ -35,6 +35,25 @@ export class FarmManager {
         return false
     }
 
+    startFarming(ws: WebSocket, playerId: string, type: 'planting' | 'watering' | 'harvesting', plotId: number) {
+        const pData = this.gameRoom.getPlayerData(ws)
+        if (pData && !pData.isActing) {
+            pData.isActing = true
+            pData.actionType = type
+            pData.actionPlotId = plotId
+            pData.actionStartTime = Date.now()
+            this.gameRoom.setPlayerData(ws, pData)
+
+            this.gameRoom.broadcast({
+                type: 'update',
+                id: playerId,
+                isActing: true,
+                actionType: type,
+                actionPlotId: plotId
+            })
+        }
+    }
+
     async plantSeeds(ws: WebSocket, playerId: string, plotId: number) {
         const plot = this.farmPlots.find(p => p.id === plotId)
         if (plot && plot.growthStage === 0) {
@@ -47,11 +66,13 @@ export class FarmManager {
                     if (hasTrowel && seedIndex !== -1) {
                         const pData = this.gameRoom.getPlayerData(ws)
                         if (pData) {
-                            pData.isActing = true; pData.actionType = 'planting'; pData.actionPlotId = plotId; this.gameRoom.setPlayerData(ws, pData)
-                            setTimeout(() => {
-                                const fresh = this.gameRoom.getPlayerData(ws)
-                                if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.gameRoom.setPlayerData(ws, fresh); }
-                            }, 2000)
+                            if (!pData.isActing || pData.actionType !== 'planting' || !pData.actionStartTime) return
+                            const elapsed = Date.now() - pData.actionStartTime
+                            if (elapsed < 3900) return // Enforce ~4s delay
+
+                            // Action complete
+                            pData.isActing = false; pData.actionType = null; pData.actionPlotId = null; pData.actionStartTime = undefined
+                            this.gameRoom.setPlayerData(ws, pData)
                         }
                         inv.splice(seedIndex, 1)
                         await this.gameRoom.env.DB.prepare('UPDATE Users SET inventory = ? WHERE id = ?').bind(JSON.stringify(inv), playerId).run()
@@ -78,11 +99,12 @@ export class FarmManager {
                     if (hasWaterCan) {
                         const pData = this.gameRoom.getPlayerData(ws)
                         if (pData) {
-                            pData.isActing = true; pData.actionType = 'watering'; pData.actionPlotId = plotId; this.gameRoom.setPlayerData(ws, pData)
-                            setTimeout(() => {
-                                const fresh = this.gameRoom.getPlayerData(ws)
-                                if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.gameRoom.setPlayerData(ws, fresh); }
-                            }, 2000)
+                            if (!pData.isActing || pData.actionType !== 'watering' || !pData.actionStartTime) return
+                            const elapsed = Date.now() - pData.actionStartTime
+                            if (elapsed < 3900) return
+
+                            pData.isActing = false; pData.actionType = null; pData.actionPlotId = null; pData.actionStartTime = undefined
+                            this.gameRoom.setPlayerData(ws, pData)
                         }
                         plot.watered = true; plot.growthStage = 2; plot.wateredAt = Date.now()
                         this.gameRoom.state.storage.put('farm_plots', this.farmPlots)
@@ -103,11 +125,12 @@ export class FarmManager {
                 if (user) {
                     const pData = this.gameRoom.getPlayerData(ws)
                     if (pData) {
-                        pData.isActing = true; pData.actionType = 'harvesting'; pData.actionPlotId = plotId; this.gameRoom.setPlayerData(ws, pData)
-                        setTimeout(() => {
-                            const fresh = this.gameRoom.getPlayerData(ws)
-                            if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.gameRoom.setPlayerData(ws, fresh); }
-                        }, 2000)
+                        if (!pData.isActing || pData.actionType !== 'harvesting' || !pData.actionStartTime) return
+                        const elapsed = Date.now() - pData.actionStartTime
+                        if (elapsed < 3900) return
+
+                        pData.isActing = false; pData.actionType = null; pData.actionPlotId = null; pData.actionStartTime = undefined
+                        this.gameRoom.setPlayerData(ws, pData)
                     }
                     let inv = JSON.parse(user.inventory || '[]') as string[]
                     inv.push('wheat')

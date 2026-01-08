@@ -83,7 +83,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     let joystickDeltaX = 0
     let joystickDeltaY = 0
 
-    let currentMode: 'game' | 'character' | 'spectate' | 'congratulations' = initialActiveRealmId ? 'game' : 'character'
+    let currentMode: 'game' | 'character' | 'spectate' | 'congratulations' | 'front_camera' = initialActiveRealmId ? 'game' : 'character'
     let tempFaceOverride: string | null = null
     let myUsername = initialUsername || ''
     let myGender: 'male' | 'female' = initialGender || 'male'
@@ -129,6 +129,11 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             if (wsConnected && ws) {
                 ws.send(JSON.stringify(msg))
             }
+        },
+        setJoystickVisible: (visible: boolean) => {
+            // Access the joystick container which is created further down
+            const jContainer = document.getElementById('joystick-container')
+            if (jContainer) jContainer.style.display = visible ? 'block' : 'none'
         }
     })
 
@@ -935,7 +940,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
     function updateFarmPlots(plots: any[]) {
         farmPlotsState = plots
-        farmingUI.updateFarmPlots(plots, lobbyState, farmPlotWheat)
+        farmingUI.updateFarmPlots(plots, lobbyState, farmPlotWheat, players)
     }
 
     function updatePlayerWeapon(playerData: Types.PlayerData, newWeapon: string | null) {
@@ -1345,7 +1350,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     const selectionCard = selectionCardElements.card
     const usernameInput = selectionCardElements.usernameInput
 
-    function switchToMode(mode: 'game' | 'character' | 'spectate' | 'congratulations') {
+    function switchToMode(mode: 'game' | 'character' | 'spectate' | 'congratulations' | 'front_camera') {
         currentMode = mode
         if (mode === 'character') {
             if (ws) {
@@ -1494,7 +1499,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     if (cameraNavBtn) {
         cameraNavBtn.addEventListener('click', () => {
             if (Date.now() - lastModalCloseTime < 300) return
-            switchToMode('spectate')
+            // Set to a front-facing selfie camera mode
+            switchToMode('front_camera')
         })
     }
 
@@ -1555,7 +1561,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             interactBtn.style.display = 'none'
             if (invBtn) invBtn.style.display = 'none'
             if (congratsModal) congratsModal.style.display = 'none'
-        } else if (currentMode === 'spectate') {
+            if (congratsModal) congratsModal.style.display = 'none'
+        } else if (currentMode === 'spectate' || currentMode === 'front_camera') {
             const selectionCard = document.getElementById('selection-card')
             if (selectionCard) selectionCard.style.display = 'none'
 
@@ -1676,7 +1683,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     const isActingNow = p?.isActing || false
                     if (currentMode === 'game' && !isActingNow) myRotation -= deltaX * 0.01
                     else if (currentMode === 'character' && charModel) charModel.rotation.y += deltaX * 0.01
-                    else if (currentMode === 'spectate') spectateRotationOffset -= deltaX * 0.01
+                    else if (currentMode === 'spectate' || currentMode === 'front_camera') spectateRotationOffset -= deltaX * 0.01
                 }
             }
         }
@@ -2465,6 +2472,16 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 const camZ = myZ + Math.cos(angle) * specDist
                 camera.position.set(camX, specHeight, camZ)
                 camera.lookAt(myX, 1.2, myZ)
+            } else if (currentMode === 'front_camera') {
+                // Front view centered on player with swipe rotation
+                const specDist = 3.5
+                const specHeight = 1.6
+                // Initial front view (PI) + manual rotation offset
+                const angle = myRotation + Math.PI + spectateRotationOffset
+                const camX = myX + Math.sin(angle) * specDist
+                const camZ = myZ + Math.cos(angle) * specDist
+                camera.position.set(camX, specHeight, camZ)
+                camera.lookAt(myX, 1.4, myZ)
             } else if (currentMode === 'congratulations') {
                 const specDist = 3.5
                 const specHeight = 1.6
@@ -2474,14 +2491,52 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 camera.position.set(camX, specHeight, camZ)
                 camera.lookAt(myX, 1.4, myZ)
             } else {
-                const camDistance = 7.5
-                const camHeight = 5
-                const camX = myX + Math.sin(myRotation) * camDistance
-                const camZ = myZ + Math.cos(myRotation) * camDistance
-                camera.position.set(camX, camHeight, camZ)
-                camera.lookAt(myX, 4, myZ)
+                // Game mode
+                const playerData = players.get(myPlayerId)
+                if (playerData && playerData.isActing) {
+                    // Farming View: Closer to a front view but still slightly off to the side
+                    // Front is myRotation + PI.
+                    // Slightly off to the side -> + 0.5 radians (approx 30 degrees)
+                    const camDistance = 3.5
+                    const camHeight = 1.6
+                    const frontSideAngle = myRotation + Math.PI + 0.5
+
+                    const targetCamX = myX + Math.sin(frontSideAngle) * camDistance
+                    const targetCamZ = myZ + Math.cos(frontSideAngle) * camDistance
+
+                    // Smoothly transition if needed, or just set it
+                    // Lerping is better but simple set is robust
+                    // Let's Lerp for smoothness
+                    camera.position.x = Utils.lerp(camera.position.x, targetCamX, 0.1)
+                    camera.position.y = Utils.lerp(camera.position.y, camHeight, 0.1)
+                    camera.position.z = Utils.lerp(camera.position.z, targetCamZ, 0.1)
+
+                    // Look at player center
+                    // We need a dummy target to interp lookAt? 
+                    // Or just lookAt every frame.
+                    camera.lookAt(myX, 1.5, myZ)
+                } else {
+                    // Normal Third Person
+                    const camDistance = 7.5
+                    const camHeight = 5
+                    const camX = myX + Math.sin(myRotation) * camDistance
+                    const camZ = myZ + Math.cos(myRotation) * camDistance
+
+                    // Standard View - Rigid (No Lerp to prevent lag/acceleration effect)
+                    // "Lower two thirds" -> Character sits lower in frame -> Look above character
+                    camera.position.set(camX, camHeight, camZ)
+                    camera.lookAt(myX, 2.5, myZ) // Look closer to head height (2.5) to balance frame (was 4)
+                    // If user wants character in "lower two thirds" (i.e. bottom part of screen), we should look HIGHER. 
+                    // Let's try LookAt Y=2.0 (Head height approx). This centers the character vertically.
+                    // If we want them Lower, we look Higher? No wait.
+                    // LookAt(Head) -> Head is Center. Feet are Below Center.
+                    // LookAt(Above Head) -> Head is Below Center.
+                    // User said "lower two third". 
+                    // I will stick to rigid camera and a standard offset.
+                    // Let's use Y=3.0 for lookAt.
+                    camera.lookAt(myX, 3.5, myZ)
+                }
             }
-            camera.lookAt(myX, 4, myZ)
         }
         if (lobbyState) {
             [lobbyState.controlPanelLabel, lobbyState.shopLabel, lobbyState.farmLabel, lobbyState.realmLabel].forEach(label => {

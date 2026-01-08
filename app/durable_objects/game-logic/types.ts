@@ -14,6 +14,7 @@ export interface Player {
     isActing?: boolean
     actionType?: string | null
     actionPlotId?: number | null
+    actionStartTime?: number
 }
 
 export interface Pickup {
