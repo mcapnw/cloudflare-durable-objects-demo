@@ -82,11 +82,24 @@ export class PlayerManager {
             weapon: dbFound ? dbWeapon : (savedLoc?.weapon || null)
         }
 
+        // Check if player is already in memory (e.g. fast reconnect/refresh)
+        // If so, use their current in-memory location instead of stored (potentially stale) location
+        if (this.players.has(id)) {
+            const existing = this.players.get(id)!
+            console.log('[PlayerManager] Player already in memory, preserving location:', id)
+            playerData.x = existing.x
+            playerData.z = existing.z
+            playerData.rotation = existing.rotation
+            // If they are in memory, they are "alive" in the room, so keep them dead/alive state?
+            // Usually we want to respawn them if they refresh?
+            // But for location, we definitely want to keep it.
+        }
+
         // Realm Init Logic - BEFORE welcome message - MUST await to ensure playerRealmMap is loaded
         await this.gameRoom.realmManager.ensureInitialized(room || 'global-room')
 
-        if (room && room !== 'global-room') {
-            // Randomize player spawn location in realm
+        // Randomize player spawn location in realm ONLY if no saved position exists AND not in memory
+        if (room && room !== 'global-room' && !savedLoc && !this.players.has(id)) {
             const spawnRadius = 20 // Spawn within 20 units
             const randomAngle = Math.random() * Math.PI * 2
             const randomDistance = Math.random() * spawnRadius

@@ -487,6 +487,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         reconnectOverlay.style.display = 'flex'
 
         const params = new URLSearchParams()
+        params.append('id', myUserId)  // CRITICAL: Include player ID for location persistence
         params.append('faceIndex', currentFaceIndex.toString())
         params.append('gender', charGender)
         params.append('username', myUsername || '')
