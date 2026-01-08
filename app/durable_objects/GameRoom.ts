@@ -3,6 +3,8 @@ import { updateSheeps } from './game-logic/sheep'
 import { updateDragon } from './game-logic/dragon'
 import { updateBullets } from './game-logic/physics'
 import { updateFarm } from './game-logic/farming'
+import { MessageHandler } from './MessageHandler'
+import { RealmManager } from './RealmManager'
 
 // Game constants
 const WORLD_BOUNDS = 25
@@ -51,16 +53,15 @@ export class GameRoomDurableObject implements DurableObject {
     players: Map<string, Player> = new Map() // Central source of truth for all players
 
     // Realm State
-    waitingPlayers: Map<string, { id: string, name: string, ready: boolean, joinedAt: number }> = new Map()
-    isRealm: boolean = false
-    realmExpiresAt: number = 0
-    activeRealms: Map<string, number> = new Map() // Track active realm IDs with expiry timestamps (only used in global room)
-    playerRealmMap: Map<string, { realmId: string, expiresAt: number }> = new Map() // Track which players are in which realms (only used in global room)
+    messageHandler: MessageHandler
+    realmManager: RealmManager
 
 
     constructor(state: DurableObjectState, env: Env) {
         this.state = state
         this.env = env
+        this.messageHandler = new MessageHandler(this)
+        this.realmManager = new RealmManager(this)
 
         // Load dragon state
         this.state.storage.get<{ isDead: boolean, health: number, damageMap?: [string, { name: string, damage: number }][] }>('dragon_state').then(saved => {
@@ -114,14 +115,17 @@ export class GameRoomDurableObject implements DurableObject {
         // Internal API for inter-DO communication (no WebSocket upgrade needed)
         if (url.pathname === '/internal/stats') {
             // Clean up expired realms first
+            // Clean up expired realms first
             const now = Date.now()
-            for (const [realmId, expiresAt] of this.activeRealms.entries()) {
+            // Cleanup logic is now inside RealmManager update/init, but for specific API access we can access activeRealms via manager
+            // Ideally RealmManager handles this, but for internal stats we access the map directly from manager
+            for (const [realmId, expiresAt] of this.realmManager.activeRealms.entries()) {
                 if (now > expiresAt) {
-                    this.activeRealms.delete(realmId)
+                    this.realmManager.activeRealms.delete(realmId)
                 }
             }
             return new Response(JSON.stringify({
-                activeRealmCount: this.activeRealms.size
+                activeRealmCount: this.realmManager.activeRealms.size
             }), { headers: { 'Content-Type': 'application/json' } })
         }
 
@@ -130,7 +134,7 @@ export class GameRoomDurableObject implements DurableObject {
             if (!playerId) {
                 return new Response(JSON.stringify({ error: 'playerId required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
             }
-            const realmData = this.playerRealmMap.get(playerId)
+            const realmData = this.realmManager.playerRealmMap.get(playerId)
             if (realmData && Date.now() < realmData.expiresAt) {
                 return new Response(JSON.stringify({
                     realmId: realmData.realmId,
@@ -139,9 +143,8 @@ export class GameRoomDurableObject implements DurableObject {
             } else {
                 // Clean up if expired
                 if (realmData) {
-                    this.playerRealmMap.delete(playerId)
-                    this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
-                        .catch(e => console.error('Failed to update player realms:', e))
+                    this.realmManager.playerRealmMap.delete(playerId)
+                    this.realmManager.savePlayerRealms()
                 }
                 return new Response(JSON.stringify({ realmId: null }), { headers: { 'Content-Type': 'application/json' } })
             }
@@ -200,12 +203,9 @@ export class GameRoomDurableObject implements DurableObject {
         }
 
         // Realm Init Logic - BEFORE welcome message
-        if (room && room !== 'global-room') {
-            this.isRealm = true
-            if (this.realmExpiresAt === 0) {
-                this.realmExpiresAt = Date.now() + 30000 // 30 seconds
-            }
+        this.realmManager.init(room)
 
+        if (room && room !== 'global-room') {
             // Randomize player spawn location in realm
             const spawnRadius = 20 // Spawn within 20 units
             const randomAngle = Math.random() * Math.PI * 2
@@ -213,45 +213,6 @@ export class GameRoomDurableObject implements DurableObject {
             playerData.x = Math.cos(randomAngle) * randomDistance
             playerData.z = Math.sin(randomAngle) * randomDistance
             playerData.rotation = Math.random() * Math.PI * 2
-
-            // Load active realm count from storage for display
-            await this.loadActiveRealmsCount()
-        } else {
-            // Load active realms from storage (global room only)
-            this.state.storage.get<[string, number][]>('active_realms').then(realms => {
-                if (realms) {
-                    this.activeRealms = new Map(realms)
-                    // Clean up expired realms
-                    const now = Date.now()
-                    for (const [realmId, expiresAt] of this.activeRealms.entries()) {
-                        if (now > expiresAt) {
-                            this.activeRealms.delete(realmId)
-                        }
-                    }
-                    if (realms.length !== this.activeRealms.size) {
-                        this.state.storage.put('active_realms', Array.from(this.activeRealms.entries()))
-                            .catch(e => console.error('Failed to update active realms:', e))
-                    }
-                }
-            }).catch(e => console.error('Failed to load active realms:', e))
-
-            // Load player-realm mapping
-            this.state.storage.get<[string, { realmId: string, expiresAt: number }][]>('player_realms').then(mapping => {
-                if (mapping) {
-                    this.playerRealmMap = new Map(mapping)
-                    // Clean up expired mappings
-                    const now = Date.now()
-                    for (const [playerId, data] of this.playerRealmMap.entries()) {
-                        if (now > data.expiresAt) {
-                            this.playerRealmMap.delete(playerId)
-                        }
-                    }
-                    if (mapping.length !== this.playerRealmMap.size) {
-                        this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
-                            .catch(e => console.error('Failed to update player realms:', e))
-                    }
-                }
-            }).catch(e => console.error('Failed to load player realms:', e))
         }
 
         this.players.set(id, playerData)
@@ -282,18 +243,19 @@ export class GameRoomDurableObject implements DurableObject {
         this.broadcast({ type: 'join', ...playerData }, id)
 
         // Send realm-specific messages
+        // Send realm-specific messages
         if (room && room !== 'global-room') {
             // Send time immediately
             server.send(JSON.stringify({
                 type: 'realm_init',
-                expiresAt: this.realmExpiresAt
+                expiresAt: this.realmManager.realmExpiresAt
             }))
         } else {
             // Send waiting list to new player in global room
-            if (this.waitingPlayers.size > 0) {
+            if (this.realmManager.waitingPlayers.size > 0) {
                 server.send(JSON.stringify({
                     type: 'realm_lobby_update',
-                    players: Array.from(this.waitingPlayers.values())
+                    players: Array.from(this.realmManager.waitingPlayers.values())
                 }))
             }
         }
@@ -325,23 +287,7 @@ export class GameRoomDurableObject implements DurableObject {
         }
     }
 
-    async loadActiveRealmsCount() {
-        try {
-            // Fetch from Global Room DO (not local storage which is isolated)
-            const globalId = this.env.GAMEROOM_NAMESPACE.idFromName('global-room')
-            const globalStub = this.env.GAMEROOM_NAMESPACE.get(globalId)
-            const response = await globalStub.fetch('http://internal/internal/stats')
-            const stats = await response.json() as { activeRealmCount: number }
-            // Store count locally for quick access in broadcasts
-            // We don't need the full Map, just the count
-            this.activeRealms.clear()
-            for (let i = 0; i < stats.activeRealmCount; i++) {
-                this.activeRealms.set(`placeholder_${i}`, 0) // Dummy entries to match count
-            }
-        } catch (e) {
-            console.error('Failed to load active realms count from global room:', e)
-        }
-    }
+
 
     updateGame() {
         try {
@@ -353,56 +299,18 @@ export class GameRoomDurableObject implements DurableObject {
 
             const now = Date.now()
 
-            if (this.isRealm) {
-                if (now > this.realmExpiresAt) {
-                    this.broadcast({ type: 'realm_expired' })
-                    this.players.clear()
-                    this.stopGameLoop()
-                    // Note: Realm cleanup happens when all players disconnect
-                    return
-                }
-
-                // Periodically refresh active realm count from storage
-                if (Math.random() < 0.1) { // 10% chance each tick (~10 times per second)
-                    this.loadActiveRealmsCount()
-                }
-
-                this.broadcast({
-                    type: 'world_update',
-                    players: players,
-                    realmTime: Math.max(0, Math.ceil((this.realmExpiresAt - now) / 1000)),
-                    activeRealmCount: this.activeRealms.size
-                })
+            if (this.realmManager.update(now, players)) {
                 return
             }
 
-            // Auto-kick from lobby if inactive for > 2 mins
-            let lobbyChanged = false
-            for (const [pid, p] of this.waitingPlayers.entries()) {
-                if (!p.ready && (now - p.joinedAt > 120000)) {
-                    this.waitingPlayers.delete(pid)
-                    lobbyChanged = true
-                }
-            }
-
-            // Clean up expired realms
-            let realmsChanged = false
-            for (const [realmId, expiresAt] of this.activeRealms.entries()) {
-                if (now > expiresAt) {
-                    this.activeRealms.delete(realmId)
-                    realmsChanged = true
-                }
-            }
-            if (realmsChanged) {
-                this.state.storage.put('active_realms', Array.from(this.activeRealms.entries()))
-                    .catch(e => console.error('Failed to update active realms:', e))
-            }
-
-            if (lobbyChanged) {
+            if (this.realmManager.isRealm) {
                 this.broadcast({
-                    type: 'realm_lobby_update',
-                    players: Array.from(this.waitingPlayers.values())
+                    type: 'world_update',
+                    players: players,
+                    realmTime: Math.max(0, Math.ceil((this.realmManager.realmExpiresAt - now) / 1000)),
+                    activeRealmCount: this.realmManager.activeRealms.size
                 })
+                return
             }
 
             updateDragon(this.dragon, players, this.bullets, (msg) => this.broadcast(msg))
@@ -437,7 +345,7 @@ export class GameRoomDurableObject implements DurableObject {
                 sheeps: this.sheeps,
                 farmPlots: this.farmPlots,
                 players: players,
-                activeRealmCount: this.activeRealms.size
+                activeRealmCount: this.realmManager.activeRealms.size
             })
         } catch (e) {
             console.error('CRITICAL: Error in updateGame loop:', e)
@@ -574,327 +482,7 @@ export class GameRoomDurableObject implements DurableObject {
     }
 
     async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-        try {
-            const data = JSON.parse(message as string)
-            const tags = this.state.getTags(ws)
-            const playerId = tags[0]
-            if (!playerId) return
-
-            if (data.type === 'move') {
-                const playerData = this.getPlayerData(ws)
-                if (playerData) {
-                    // Validate input
-                    if (!isValidNumber(data.x) || !isValidNumber(data.z)) return
-
-                    // Clamp to world bounds
-                    playerData.x = clamp(data.x, -WORLD_BOUNDS, WORLD_BOUNDS)
-                    playerData.z = clamp(data.z, -WORLD_BOUNDS, WORLD_BOUNDS)
-
-                    // Validate and normalize rotation
-                    if (isValidNumber(data.rotation)) {
-                        playerData.rotation = data.rotation % (Math.PI * 2)
-                    }
-
-                    // Update centralized map
-                    this.players.set(playerId, playerData)
-                    this.setPlayerData(ws, playerData)
-
-                    this.broadcast({
-                        type: 'update',
-                        id: playerId,
-                        x: playerData.x,
-                        z: playerData.z,
-                        rotation: playerData.rotation,
-                        firstName: playerData.firstName,
-                        username: playerData.username
-                    }, playerId)
-                }
-            } else if (data.type === 'change_gender') {
-                // Validate gender value
-                if (data.gender !== 'male' && data.gender !== 'female') return
-
-                const playerData = this.getPlayerData(ws)
-                if (playerData) {
-                    playerData.gender = data.gender
-                    this.setPlayerData(ws, playerData)
-                    this.broadcast({
-                        type: 'update',
-                        id: playerId,
-                        x: playerData.x,
-                        z: playerData.z,
-                        rotation: playerData.rotation,
-                        gender: playerData.gender
-                    }, playerId)
-                }
-            } else if (data.type === 'shoot') {
-                if (this.dragon.isDead) return
-                const playerData = this.getPlayerData(ws)
-                if (!playerData) return
-                if (playerData.isDead) return
-
-                // Server-side rate limiting
-                const now = Date.now()
-                const lastShoot = this.playerLastShoot.get(playerId) || 0
-                if (now - lastShoot < SHOOT_COOLDOWN_MS) return
-                this.playerLastShoot.set(playerId, now)
-
-                const speed = 2.0
-                const rot = playerData.rotation
-                const startDist = 1.0
-                const vx = -Math.sin(rot) * speed
-                const vz = -Math.cos(rot) * speed
-                this.bullets.push({
-                    id: crypto.randomUUID(),
-                    x: playerData.x - Math.sin(rot) * startDist,
-                    z: playerData.z - Math.cos(rot) * startDist,
-                    vx: vx,
-                    vz: vz,
-                    ownerId: playerId,
-                    createdAt: now,
-                    speed: speed
-                })
-            } else if (data.type === 'get_scores') {
-                const scores = await this.env.DB.prepare('SELECT username, first_name, dragon_kills, deaths FROM Users ORDER BY dragon_kills DESC LIMIT 5').all()
-                ws.send(JSON.stringify({ type: 'scores', scores: scores.results }))
-            } else if (data.type === 'collect_pickup') {
-                const pickup = this.pickups.get(data.pickupId)
-                if (pickup && pickup.playerId === playerId) {
-                    if (pickup.weaponType === 'coin') {
-                        const amount = pickup.coinAmount || 1
-                        this.pickups.delete(data.pickupId)
-                        this.env.DB.prepare('UPDATE Users SET coins = coins + ? WHERE id = ?').bind(amount, playerId).run().catch(e => console.error('Failed to update coins:', e))
-                        ws.send(JSON.stringify({ type: 'coins_earned', amount }))
-                    } else {
-                        const playerData = this.getPlayerData(ws)
-                        if (playerData) {
-                            playerData.weapon = pickup.weaponType
-                            this.setPlayerData(ws, playerData)
-                            this.pickups.delete(data.pickupId)
-
-                            if (pickup.weaponType === 'staff_beginner') {
-                                this.env.DB.prepare('UPDATE Users SET coins = coins + 10, weapon = ? WHERE id = ?')
-                                    .bind(pickup.weaponType, playerId)
-                                    .run()
-                                    .catch(e => console.error('Failed to update weapon/coins:', e))
-                                ws.send(JSON.stringify({ type: 'coins_earned', amount: 10 }))
-                            } else {
-                                this.env.DB.prepare('UPDATE Users SET weapon = ? WHERE id = ?')
-                                    .bind(pickup.weaponType, playerId)
-                                    .run()
-                                    .catch(e => console.error('Failed to update weapon:', e))
-                            }
-
-                            this.broadcast({ type: 'weapon_update', id: playerId, weapon: pickup.weaponType })
-                        }
-                    }
-                }
-            } else if (data.type === 'spawn_dragon') {
-                if (this.dragon.isDead) {
-                    this.dragon.health = 10
-                    this.dragon.isDead = false
-                    this.dragon.x = 0
-                    this.dragon.z = 0
-                    this.dragon.damageMap.clear()
-                    this.state.storage.put('dragon_state', { isDead: false, health: 10, damageMap: [] })
-                    this.broadcast({ type: 'dragon_respawn' })
-                }
-            } else if (data.type === 'buy_item') {
-                const itemId = data.itemId
-                const costs: { [key: string]: number } = { 'wheat_seeds': 1, 'water_can': 5, 'trowel': 5 }
-                const cost = costs[itemId]
-                if (cost !== undefined) {
-                    try {
-                        const user = await this.env.DB.prepare('SELECT coins, inventory FROM Users WHERE id = ?').bind(playerId).first<{ coins: number, inventory: string }>()
-                        if (user && user.coins >= cost) {
-                            let inv = JSON.parse(user.inventory || '[]') as string[]
-                            inv.push(itemId)
-                            await this.env.DB.prepare('UPDATE Users SET coins = coins - ?, inventory = ? WHERE id = ?').bind(cost, JSON.stringify(inv), playerId).run()
-                            ws.send(JSON.stringify({ type: 'buy_success', item: itemId, coins: user.coins - cost, inventory: inv }))
-                        } else {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Not enough coins' }))
-                        }
-                    } catch (e) { console.error('Buy item error:', e) }
-                }
-            } else if (data.type === 'plant_seeds') {
-                const plotId = data.plotId
-                const plot = this.farmPlots.find(p => p.id === plotId)
-                if (plot && plot.growthStage === 0) {
-                    try {
-                        const user = await this.env.DB.prepare('SELECT inventory FROM Users WHERE id = ?').bind(playerId).first<{ inventory: string }>()
-                        if (user) {
-                            let inv = JSON.parse(user.inventory || '[]') as string[]
-                            const hasTrowel = inv.includes('trowel')
-                            const seedIndex = inv.indexOf('wheat_seeds')
-                            if (hasTrowel && seedIndex !== -1) {
-                                const pData = this.getPlayerData(ws)
-                                if (pData) {
-                                    pData.isActing = true; pData.actionType = 'planting'; pData.actionPlotId = plotId; this.setPlayerData(ws, pData)
-                                    setTimeout(() => {
-                                        const fresh = this.getPlayerData(ws)
-                                        if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.setPlayerData(ws, fresh); }
-                                    }, 2000)
-                                }
-                                inv.splice(seedIndex, 1)
-                                await this.env.DB.prepare('UPDATE Users SET inventory = ? WHERE id = ?').bind(JSON.stringify(inv), playerId).run()
-                                plot.planted = true; plot.growthStage = 1; plot.planterId = playerId
-                                this.state.storage.put('farm_plots', this.farmPlots)
-                                this.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
-                                ws.send(JSON.stringify({ type: 'inventory_update', inventory: inv }))
-                            } else {
-                                ws.send(JSON.stringify({ type: 'error', message: 'Need trowel and wheat seeds' }))
-                            }
-                        }
-                    } catch (e) { console.error('Plant seeds error:', e) }
-                }
-            } else if (data.type === 'water_wheat') {
-                const plotId = data.plotId
-                const plot = this.farmPlots.find(p => p.id === plotId)
-                if (plot && plot.growthStage === 1) {
-                    try {
-                        const user = await this.env.DB.prepare('SELECT inventory FROM Users WHERE id = ?').bind(playerId).first<{ inventory: string }>()
-                        if (user) {
-                            let inv = JSON.parse(user.inventory || '[]') as string[]
-                            const hasWaterCan = inv.includes('water_can')
-                            if (hasWaterCan) {
-                                const pData = this.getPlayerData(ws)
-                                if (pData) {
-                                    pData.isActing = true; pData.actionType = 'watering'; pData.actionPlotId = plotId; this.setPlayerData(ws, pData)
-                                    setTimeout(() => {
-                                        const fresh = this.getPlayerData(ws)
-                                        if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.setPlayerData(ws, fresh); }
-                                    }, 2000)
-                                }
-                                plot.watered = true; plot.growthStage = 2; plot.wateredAt = Date.now()
-                                this.state.storage.put('farm_plots', this.farmPlots)
-                                this.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
-                            } else {
-                                ws.send(JSON.stringify({ type: 'error', message: 'Need water can' }))
-                            }
-                        }
-                    } catch (e) { console.error('Water wheat error:', e) }
-                }
-            } else if (data.type === 'harvest_wheat') {
-                const plotId = data.plotId
-                const plot = this.farmPlots.find(p => p.id === plotId)
-                if (plot && plot.growthStage === 3) {
-                    try {
-                        const user = await this.env.DB.prepare('SELECT inventory FROM Users WHERE id = ?').bind(playerId).first<{ inventory: string }>()
-                        if (user) {
-                            const pData = this.getPlayerData(ws)
-                            if (pData) {
-                                pData.isActing = true; pData.actionType = 'harvesting'; pData.actionPlotId = plotId; this.setPlayerData(ws, pData)
-                                setTimeout(() => {
-                                    const fresh = this.getPlayerData(ws)
-                                    if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.setPlayerData(ws, fresh); }
-                                }, 2000)
-                            }
-                            let inv = JSON.parse(user.inventory || '[]') as string[]
-                            inv.push('wheat')
-                            await this.env.DB.prepare('UPDATE Users SET inventory = ? WHERE id = ?').bind(JSON.stringify(inv), playerId).run()
-                            plot.planted = false; plot.watered = false; plot.growthStage = 0; plot.wateredAt = 0; plot.planterId = null
-                            this.state.storage.put('farm_plots', this.farmPlots)
-                            this.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
-                            ws.send(JSON.stringify({ type: 'inventory_update', inventory: inv }))
-                        }
-                    } catch (e) { console.error('Harvest wheat error:', e) }
-                }
-
-            } else if (data.type === 'join_realm_lobby') {
-                const p = this.getPlayerData(ws)
-                if (p) {
-                    const name = (p.username && p.username.trim() !== '') ? p.username : p.firstName
-                    this.waitingPlayers.set(playerId, { id: playerId, name: name, ready: false, joinedAt: Date.now() })
-                    this.broadcast({
-                        type: 'realm_lobby_update',
-                        players: Array.from(this.waitingPlayers.values())
-                    })
-                }
-            } else if (data.type === 'leave_realm_lobby') {
-                if (this.waitingPlayers.has(playerId)) {
-                    this.waitingPlayers.delete(playerId)
-                    this.broadcast({
-                        type: 'realm_lobby_update',
-                        players: Array.from(this.waitingPlayers.values())
-                    })
-                }
-            } else if (data.type === 'realm_ready') {
-                if (this.waitingPlayers.has(playerId)) {
-                    const entry = this.waitingPlayers.get(playerId)!
-                    entry.ready = !entry.ready
-                    this.waitingPlayers.set(playerId, entry)
-
-                    const allPlayers = Array.from(this.waitingPlayers.values())
-                    this.broadcast({
-                        type: 'realm_lobby_update',
-                        players: allPlayers
-                    })
-
-                    // Check start condition
-                    const readyCount = allPlayers.filter(p => p.ready).length
-                    if (allPlayers.length >= 1 && readyCount === allPlayers.length) {
-                        const newRealmId = crypto.randomUUID()
-                        const realmExpiresAt = Date.now() + 30000 // 30 seconds
-
-                        // Track new realm instance with expiry time
-                        this.activeRealms.set(newRealmId, realmExpiresAt)
-                        this.state.storage.put('active_realms', Array.from(this.activeRealms.entries()))
-                            .catch(e => console.error('Failed to save active realms:', e))
-
-                        // Track players entering this realm
-                        for (const wp of allPlayers) {
-                            this.playerRealmMap.set(wp.id, { realmId: newRealmId, expiresAt: realmExpiresAt })
-                        }
-                        this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
-                            .catch(e => console.error('Failed to save player realms:', e))
-
-                        // Notify ONLY the waiting players
-                        for (const wp of allPlayers) {
-                            const sockets = this.state.getWebSockets(wp.id)
-                            for (const s of sockets) {
-                                s.send(JSON.stringify({ type: 'start_realm', realmId: newRealmId }))
-                            }
-                        }
-                        // Clear waiting room
-                        this.waitingPlayers.clear()
-                        this.broadcast({
-                            type: 'realm_lobby_update',
-                            players: []
-                        })
-                    }
-                }
-            } else if (data.type === 'get_player_realm') {
-                // Query if this player has an active realm session
-                // Load fresh from storage to avoid race condition
-                try {
-                    const mapping = await this.state.storage.get<[string, { realmId: string, expiresAt: number }][]>('player_realms')
-                    if (mapping) {
-                        this.playerRealmMap = new Map(mapping)
-                    }
-                } catch (e) {
-                    console.error('Failed to load player realms:', e)
-                }
-
-                const realmData = this.playerRealmMap.get(playerId)
-                if (realmData && Date.now() < realmData.expiresAt) {
-                    ws.send(JSON.stringify({
-                        type: 'player_realm_info',
-                        realmId: realmData.realmId,
-                        expiresAt: realmData.expiresAt
-                    }))
-                } else {
-                    // No active realm or expired
-                    if (realmData) {
-                        this.playerRealmMap.delete(playerId)
-                        this.state.storage.put('player_realms', Array.from(this.playerRealmMap.entries()))
-                            .catch(e => console.error('Failed to update player realms:', e))
-                    }
-                    ws.send(JSON.stringify({
-                        type: 'player_realm_info',
-                        realmId: null
-                    }))
-                }
-            }
-        } catch (err) { console.error('Error parsing message', err) }
+        await this.messageHandler.handle(ws, message)
     }
 
     async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
@@ -918,13 +506,7 @@ export class GameRoomDurableObject implements DurableObject {
                 this.broadcast({ type: 'leave', id: playerId })
 
                 // Cleanup waiting room if they disconnect
-                if (this.waitingPlayers.has(playerId)) {
-                    this.waitingPlayers.delete(playerId)
-                    this.broadcast({
-                        type: 'realm_lobby_update',
-                        players: Array.from(this.waitingPlayers.values())
-                    })
-                }
+                this.realmManager.leaveLobby(playerId)
             }
             ws.close()
         }
