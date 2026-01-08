@@ -12,6 +12,29 @@ export default createRoute(async (c) => {
     const coins = (dbUser as any)?.coins || 0
     const inventory = JSON.parse((dbUser as any)?.inventory || '[]')
 
+    // Check for active realm session server-side
+    let activeRealmId: string | null = null
+    if (sessionUser?.id) {
+        try {
+            const env = c.env as any
+            const globalId = env.GAMEROOM_NAMESPACE.idFromName('global-room')
+            const globalStub = env.GAMEROOM_NAMESPACE.get(globalId)
+            console.log('[SERVER] Fetching realm info for user:', sessionUser.id)
+            const response = await globalStub.fetch(`http://internal/internal/player-realm?playerId=${sessionUser.id}`)
+            console.log('[SERVER] Response status:', response.status, response.ok)
+            if (response.ok) {
+                const data = await response.json() as { realmId: string | null }
+                activeRealmId = data.realmId
+                console.log('[SERVER] Active realm check result:', activeRealmId)
+            } else {
+                console.error('[SERVER] Response not OK:', await response.text())
+            }
+        } catch (e) {
+            console.error('[SERVER] Failed to check active realm:', e)
+        }
+    }
+    console.log('[SERVER] Final activeRealmId being passed to client:', activeRealmId)
+
     return c.render(
         <div style="width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden;">
             <div id="ui-layer" style="position: fixed; top: 0; left: 0; width: 100%; pointer-events: none; z-index: 100;">
@@ -75,6 +98,7 @@ export default createRoute(async (c) => {
                 initialCoins={coins}
                 initialInventory={inventory}
                 tutorialComplete={!!(dbUser as any)?.tutorial_complete}
+                activeRealmId={activeRealmId}
             />
         </div>,
         { title: 'Antigravity - Game' }

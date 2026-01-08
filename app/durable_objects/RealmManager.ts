@@ -11,16 +11,24 @@ export class RealmManager {
 
     constructor(private gameRoom: GameRoomDurableObject) { }
 
-    init(room: string | null) {
+
+
+    initialized: boolean = false
+
+    async ensureInitialized(room: string | null) {
+        if (this.initialized) return
+        this.initialized = true
+
         if (room && room !== 'global-room') {
             this.isRealm = true
             if (this.realmExpiresAt === 0) {
                 this.realmExpiresAt = Date.now() + 30000 // 30 seconds
             }
-            this.loadActiveRealmsCount()
+            await this.loadActiveRealmsCount()
         } else {
             // Load persistent state for global room
-            this.gameRoom.state.storage.get<[string, number][]>('active_realms').then(realms => {
+            try {
+                const realms = await this.gameRoom.state.storage.get<[string, number][]>('active_realms')
                 if (realms) {
                     this.activeRealms = new Map(realms)
                     // Clean up expired realms
@@ -33,12 +41,13 @@ export class RealmManager {
                         }
                     }
                     if (realms.length !== this.activeRealms.size) {
-                        this.saveActiveRealms()
+                        await this.saveActiveRealms()
                     }
                 }
-            }).catch(e => console.error('Failed to load active realms:', e))
+            } catch (e) { console.error('Failed to load active realms:', e) }
 
-            this.gameRoom.state.storage.get<[string, { realmId: string, expiresAt: number }][]>('player_realms').then(mapping => {
+            try {
+                const mapping = await this.gameRoom.state.storage.get<[string, { realmId: string, expiresAt: number }][]>('player_realms')
                 if (mapping) {
                     this.playerRealmMap = new Map(mapping)
                     // Clean up expired mappings
@@ -49,11 +58,15 @@ export class RealmManager {
                         }
                     }
                     if (mapping.length !== this.playerRealmMap.size) {
-                        this.savePlayerRealms()
+                        await this.savePlayerRealms()
                     }
                 }
-            }).catch(e => console.error('Failed to load player realms:', e))
+            } catch (e) { console.error('Failed to load player realms:', e) }
         }
+    }
+
+    init(room: string | null) {
+        this.ensureInitialized(room).catch(e => console.error('Failed to initialize RealmManager:', e))
     }
 
     async loadActiveRealmsCount() {
@@ -88,7 +101,7 @@ export class RealmManager {
         if (this.isRealm) {
             if (now > this.realmExpiresAt) {
                 this.gameRoom.broadcast({ type: 'realm_expired' })
-                this.gameRoom.players.clear()
+                this.gameRoom.playerManager.players.clear()
                 this.gameRoom.stopGameLoop()
                 return true
             }

@@ -24,7 +24,7 @@ export class MessageHandler {
             if (!playerId) return
 
             if (data.type === 'move') {
-                const playerData = this.gameRoom.getPlayerData(ws)
+                const playerData = this.gameRoom.playerManager.getPlayerData(ws)
                 if (playerData) {
                     // Validate input
                     if (!isValidNumber(data.x) || !isValidNumber(data.z)) return
@@ -39,8 +39,8 @@ export class MessageHandler {
                     }
 
                     // Update centralized map
-                    this.gameRoom.players.set(playerId, playerData)
-                    this.gameRoom.setPlayerData(ws, playerData)
+                    this.gameRoom.playerManager.players.set(playerId, playerData)
+                    this.gameRoom.playerManager.setPlayerData(ws, playerData)
 
                     this.gameRoom.broadcast({
                         type: 'update',
@@ -56,10 +56,10 @@ export class MessageHandler {
                 // Validate gender value
                 if (data.gender !== 'male' && data.gender !== 'female') return
 
-                const playerData = this.gameRoom.getPlayerData(ws)
+                const playerData = this.gameRoom.playerManager.getPlayerData(ws)
                 if (playerData) {
                     playerData.gender = data.gender
-                    this.gameRoom.setPlayerData(ws, playerData)
+                    this.gameRoom.playerManager.setPlayerData(ws, playerData)
                     this.gameRoom.broadcast({
                         type: 'update',
                         id: playerId,
@@ -70,16 +70,16 @@ export class MessageHandler {
                     }, playerId)
                 }
             } else if (data.type === 'shoot') {
-                if (this.gameRoom.dragon.isDead) return
-                const playerData = this.gameRoom.getPlayerData(ws)
+                if (this.gameRoom.dragonManager.dragon.isDead) return
+                const playerData = this.gameRoom.playerManager.getPlayerData(ws)
                 if (!playerData) return
                 if (playerData.isDead) return
 
                 // Server-side rate limiting
                 const now = Date.now()
-                const lastShoot = this.gameRoom.playerLastShoot.get(playerId) || 0
+                const lastShoot = this.gameRoom.playerManager.playerLastShoot.get(playerId) || 0
                 if (now - lastShoot < SHOOT_COOLDOWN_MS) return
-                this.gameRoom.playerLastShoot.set(playerId, now)
+                this.gameRoom.playerManager.playerLastShoot.set(playerId, now)
 
                 const speed = 2.0
                 const rot = playerData.rotation
@@ -108,10 +108,10 @@ export class MessageHandler {
                         this.gameRoom.env.DB.prepare('UPDATE Users SET coins = coins + ? WHERE id = ?').bind(amount, playerId).run().catch(e => console.error('Failed to update coins:', e))
                         ws.send(JSON.stringify({ type: 'coins_earned', amount }))
                     } else {
-                        const playerData = this.gameRoom.getPlayerData(ws)
+                        const playerData = this.gameRoom.playerManager.getPlayerData(ws)
                         if (playerData) {
                             playerData.weapon = pickup.weaponType
-                            this.gameRoom.setPlayerData(ws, playerData)
+                            this.gameRoom.playerManager.setPlayerData(ws, playerData)
                             this.gameRoom.pickups.delete(data.pickupId)
 
                             if (pickup.weaponType === 'staff_beginner') {
@@ -132,15 +132,7 @@ export class MessageHandler {
                     }
                 }
             } else if (data.type === 'spawn_dragon') {
-                if (this.gameRoom.dragon.isDead) {
-                    this.gameRoom.dragon.health = 10
-                    this.gameRoom.dragon.isDead = false
-                    this.gameRoom.dragon.x = 0
-                    this.gameRoom.dragon.z = 0
-                    this.gameRoom.dragon.damageMap.clear()
-                    this.gameRoom.state.storage.put('dragon_state', { isDead: false, health: 10, damageMap: [] })
-                    this.gameRoom.broadcast({ type: 'dragon_respawn' })
-                }
+                this.gameRoom.dragonManager.respawn()
             } else if (data.type === 'buy_item') {
                 const itemId = data.itemId
                 const costs: { [key: string]: number } = { 'wheat_seeds': 1, 'water_can': 5, 'trowel': 5 }
@@ -159,91 +151,13 @@ export class MessageHandler {
                     } catch (e) { console.error('Buy item error:', e) }
                 }
             } else if (data.type === 'plant_seeds') {
-                const plotId = data.plotId
-                const plot = this.gameRoom.farmPlots.find(p => p.id === plotId)
-                if (plot && plot.growthStage === 0) {
-                    try {
-                        const user = await this.gameRoom.env.DB.prepare('SELECT inventory FROM Users WHERE id = ?').bind(playerId).first<{ inventory: string }>()
-                        if (user) {
-                            let inv = JSON.parse(user.inventory || '[]') as string[]
-                            const hasTrowel = inv.includes('trowel')
-                            const seedIndex = inv.indexOf('wheat_seeds')
-                            if (hasTrowel && seedIndex !== -1) {
-                                const pData = this.gameRoom.getPlayerData(ws)
-                                if (pData) {
-                                    pData.isActing = true; pData.actionType = 'planting'; pData.actionPlotId = plotId; this.gameRoom.setPlayerData(ws, pData)
-                                    setTimeout(() => {
-                                        const fresh = this.gameRoom.getPlayerData(ws)
-                                        if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.gameRoom.setPlayerData(ws, fresh); }
-                                    }, 2000)
-                                }
-                                inv.splice(seedIndex, 1)
-                                await this.gameRoom.env.DB.prepare('UPDATE Users SET inventory = ? WHERE id = ?').bind(JSON.stringify(inv), playerId).run()
-                                plot.planted = true; plot.growthStage = 1; plot.planterId = playerId
-                                this.gameRoom.state.storage.put('farm_plots', this.gameRoom.farmPlots)
-                                this.gameRoom.broadcast({ type: 'farm_update', farmPlots: this.gameRoom.farmPlots })
-                                ws.send(JSON.stringify({ type: 'inventory_update', inventory: inv }))
-                            } else {
-                                ws.send(JSON.stringify({ type: 'error', message: 'Need trowel and wheat seeds' }))
-                            }
-                        }
-                    } catch (e) { console.error('Plant seeds error:', e) }
-                }
+                this.gameRoom.farmManager.plantSeeds(ws, playerId, data.plotId)
             } else if (data.type === 'water_wheat') {
-                const plotId = data.plotId
-                const plot = this.gameRoom.farmPlots.find(p => p.id === plotId)
-                if (plot && plot.growthStage === 1) {
-                    try {
-                        const user = await this.gameRoom.env.DB.prepare('SELECT inventory FROM Users WHERE id = ?').bind(playerId).first<{ inventory: string }>()
-                        if (user) {
-                            let inv = JSON.parse(user.inventory || '[]') as string[]
-                            const hasWaterCan = inv.includes('water_can')
-                            if (hasWaterCan) {
-                                const pData = this.gameRoom.getPlayerData(ws)
-                                if (pData) {
-                                    pData.isActing = true; pData.actionType = 'watering'; pData.actionPlotId = plotId; this.gameRoom.setPlayerData(ws, pData)
-                                    setTimeout(() => {
-                                        const fresh = this.gameRoom.getPlayerData(ws)
-                                        if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.gameRoom.setPlayerData(ws, fresh); }
-                                    }, 2000)
-                                }
-                                plot.watered = true; plot.growthStage = 2; plot.wateredAt = Date.now()
-                                this.gameRoom.state.storage.put('farm_plots', this.gameRoom.farmPlots)
-                                this.gameRoom.broadcast({ type: 'farm_update', farmPlots: this.gameRoom.farmPlots })
-                            } else {
-                                ws.send(JSON.stringify({ type: 'error', message: 'Need water can' }))
-                            }
-                        }
-                    } catch (e) { console.error('Water wheat error:', e) }
-                }
+                this.gameRoom.farmManager.waterWheat(ws, playerId, data.plotId)
             } else if (data.type === 'harvest_wheat') {
-                const plotId = data.plotId
-                const plot = this.gameRoom.farmPlots.find(p => p.id === plotId)
-                if (plot && plot.growthStage === 3) {
-                    try {
-                        const user = await this.gameRoom.env.DB.prepare('SELECT inventory FROM Users WHERE id = ?').bind(playerId).first<{ inventory: string }>()
-                        if (user) {
-                            const pData = this.gameRoom.getPlayerData(ws)
-                            if (pData) {
-                                pData.isActing = true; pData.actionType = 'harvesting'; pData.actionPlotId = plotId; this.gameRoom.setPlayerData(ws, pData)
-                                setTimeout(() => {
-                                    const fresh = this.gameRoom.getPlayerData(ws)
-                                    if (fresh) { fresh.isActing = false; fresh.actionType = null; fresh.actionPlotId = null; this.gameRoom.setPlayerData(ws, fresh); }
-                                }, 2000)
-                            }
-                            let inv = JSON.parse(user.inventory || '[]') as string[]
-                            inv.push('wheat')
-                            await this.gameRoom.env.DB.prepare('UPDATE Users SET inventory = ? WHERE id = ?').bind(JSON.stringify(inv), playerId).run()
-                            plot.planted = false; plot.watered = false; plot.growthStage = 0; plot.wateredAt = 0; plot.planterId = null
-                            this.gameRoom.state.storage.put('farm_plots', this.gameRoom.farmPlots)
-                            this.gameRoom.broadcast({ type: 'farm_update', farmPlots: this.gameRoom.farmPlots })
-                            ws.send(JSON.stringify({ type: 'inventory_update', inventory: inv }))
-                        }
-                    } catch (e) { console.error('Harvest wheat error:', e) }
-                }
-
+                this.gameRoom.farmManager.harvestWheat(ws, playerId, data.plotId)
             } else if (data.type === 'join_realm_lobby') {
-                const p = this.gameRoom.getPlayerData(ws)
+                const p = this.gameRoom.playerManager.getPlayerData(ws)
                 if (p) {
                     this.gameRoom.realmManager.joinLobby(p)
                 }

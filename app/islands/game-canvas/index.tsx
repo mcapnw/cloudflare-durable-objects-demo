@@ -9,7 +9,7 @@ import * as RealmManager from './realmManager'
 import * as SelectionCard from './selectionCard'
 import { FarmingUI } from './farmingUI'
 
-export default function GameCanvas({ userId, firstName, username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete }: Types.GameCanvasProps) {
+export default function GameCanvas({ userId, firstName, username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete, activeRealmId }: Types.GameCanvasProps & { activeRealmId?: string | null }) {
     const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -19,7 +19,7 @@ export default function GameCanvas({ userId, firstName, username, gender, faceIn
             import('three/examples/jsm/loaders/GLTFLoader.js'),
             import('three/examples/jsm/utils/SkeletonUtils.js')
         ]).then(([THREE, { GLTFLoader }, SkeletonUtils]) => {
-            initGame(THREE, { GLTFLoader, SkeletonUtils }, containerRef.current!, userId || 'anonymous', firstName || 'Player', username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete)
+            initGame(THREE, { GLTFLoader, SkeletonUtils }, containerRef.current!, userId || 'anonymous', firstName || 'Player', username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete, activeRealmId)
         })
     }, [])
 
@@ -28,7 +28,7 @@ export default function GameCanvas({ userId, firstName, username, gender, faceIn
     )
 }
 
-function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, container: HTMLElement, myUserId: string, myFirstName: string, initialUsername?: string, initialGender?: 'male' | 'female', initialFaceIndex?: number, initialCoins: number = 0, initialInventory: string[] = [], tutorialComplete: boolean = false) {
+function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, container: HTMLElement, myUserId: string, myFirstName: string, initialUsername?: string, initialGender?: 'male' | 'female', initialFaceIndex?: number, initialCoins: number = 0, initialInventory: string[] = [], tutorialComplete: boolean = false, initialActiveRealmId?: string | null) {
     // Initialize Factories
     MeshFactories.initFactories(THREE, LOADERS.SkeletonUtils);
 
@@ -47,7 +47,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     let inventory = initialInventory
     let farmPlotsState: any[] = []
 
-    let isInRealm = false
+    let currentRoomId = initialActiveRealmId || null
+    let isInRealm = !!initialActiveRealmId
     let lobbyState: LobbyManager.LobbyState | null = null
     let realmState: RealmManager.RealmState | null = null
 
@@ -64,7 +65,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     let isInventoryOpen = false
     let isShopOpen = false
     let isScoreboardOpen = false
-    let isCharacterCustomizing = true
+    let isCharacterCustomizing = !initialActiveRealmId
 
 
 
@@ -82,7 +83,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     let joystickDeltaX = 0
     let joystickDeltaY = 0
 
-    let currentMode: 'game' | 'character' | 'spectate' | 'congratulations' = 'character'
+    let currentMode: 'game' | 'character' | 'spectate' | 'congratulations' = initialActiveRealmId ? 'game' : 'character'
     let tempFaceOverride: string | null = null
     let myUsername = initialUsername || ''
     let myGender: 'male' | 'female' = initialGender || 'male'
@@ -138,7 +139,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     // WebSocket vars
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/game`
-    let currentRoomId: string | null = null
+
 
 
     // Scene setup
@@ -548,6 +549,19 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             } else if (data.type === 'farm_update') {
                 updateFarmPlots(data.farmPlots)
             } else if (data.type === 'welcome') {
+                if (data.activeRealm) {
+                    console.log('Active realm found, redirecting...', data.activeRealm)
+                    currentRoomId = data.activeRealm
+                    isInRealm = true
+                    currentMode = 'game' // Bypass character screen
+                    updateUIVisibility()
+                    if (ws) ws.close()
+                    ws = null
+                    wsConnected = false
+                    setTimeout(() => connectWebSocket(true), 100)
+                    return // Stop processing welcome message
+                }
+
                 myPlayerId = data.id
                 myX = data.x || 0
                 myZ = data.z || 0
@@ -760,6 +774,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         }
     }
+
+
 
     function updateEconomicUI() {
         const invModal = document.getElementById('inventory-modal')
@@ -2486,6 +2502,12 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     versionInterval = setInterval(checkVersion, 30000)
     checkVersion()
     switchToScene('lobby')
+
+    // If player has active realm, connect immediately
+    if (initialActiveRealmId) {
+        console.log('[CLIENT] Active realm detected on init, connecting immediately:', initialActiveRealmId)
+        connectWebSocket(true)
+    }
 
     animate()
 }

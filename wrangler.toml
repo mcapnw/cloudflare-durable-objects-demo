@@ -17,3 +17,10 @@ database_id = "f39459bf-f8b2-447b-a454-2262e3dd49b8"
 binding = "DO_WORKER"
 service = "antigravity-do"
 
+# Durable Object namespace binding for direct access from Pages
+[[durable_objects.bindings]]
+name = "GAMEROOM_NAMESPACE"
+class_name = "GameRoomDurableObject"
+script_name = "antigravity-do"
+
+
