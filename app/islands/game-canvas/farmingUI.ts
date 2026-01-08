@@ -224,6 +224,12 @@ export class FarmingUI {
         const actionText = type.charAt(0).toUpperCase() + type.slice(1)
         this.setInteractButton(`${actionText}...`, '#9CA3AF', 'white', false)
 
+        // Move button to bottom of screen for visibility during action (local player only)
+        const btn = this.config.interactBtn
+        btn.style.top = 'auto'
+        btn.style.bottom = '100px'
+        btn.style.transform = 'translate(-50%, 0)'
+
 
         // Send start signal first
         this.config.onSendMessage({ type: 'start_farming', action: type, plotId })
@@ -238,6 +244,12 @@ export class FarmingUI {
             this.config.onSendMessage({ type: serverType, plotId })
 
             if (currentP && currentP.isActing && currentP.actionType === type) {
+                // Restore button position
+                const btn = this.config.interactBtn
+                btn.style.top = '50%'
+                btn.style.bottom = 'auto'
+                btn.style.transform = 'translate(-50%, calc(-50% - 60px))'
+
                 currentP.isActing = false
                 currentP.actionType = null
                 currentP.actingPlotId = null

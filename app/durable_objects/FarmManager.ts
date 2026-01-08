@@ -73,6 +73,13 @@ export class FarmManager {
                             // Action complete
                             pData.isActing = false; pData.actionType = null; pData.actionPlotId = null; pData.actionStartTime = undefined
                             this.gameRoom.setPlayerData(ws, pData)
+                            this.gameRoom.broadcast({
+                                type: 'update',
+                                id: playerId,
+                                isActing: false,
+                                actionType: null,
+                                actionPlotId: null
+                            })
                         }
                         inv.splice(seedIndex, 1)
                         await this.gameRoom.env.DB.prepare('UPDATE Users SET inventory = ? WHERE id = ?').bind(JSON.stringify(inv), playerId).run()
@@ -105,6 +112,13 @@ export class FarmManager {
 
                             pData.isActing = false; pData.actionType = null; pData.actionPlotId = null; pData.actionStartTime = undefined
                             this.gameRoom.setPlayerData(ws, pData)
+                            this.gameRoom.broadcast({
+                                type: 'update',
+                                id: playerId,
+                                isActing: false,
+                                actionType: null,
+                                actionPlotId: null
+                            })
                         }
                         plot.watered = true; plot.growthStage = 2; plot.wateredAt = Date.now()
                         this.gameRoom.state.storage.put('farm_plots', this.farmPlots)
@@ -131,6 +145,13 @@ export class FarmManager {
 
                         pData.isActing = false; pData.actionType = null; pData.actionPlotId = null; pData.actionStartTime = undefined
                         this.gameRoom.setPlayerData(ws, pData)
+                        this.gameRoom.broadcast({
+                            type: 'update',
+                            id: playerId,
+                            isActing: false,
+                            actionType: null,
+                            actionPlotId: null
+                        })
                     }
                     let inv = JSON.parse(user.inventory || '[]') as string[]
                     inv.push('wheat')

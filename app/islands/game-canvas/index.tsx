@@ -1151,6 +1151,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             playerData.targetX = data.x
             playerData.targetZ = data.z
             playerData.targetRotation = data.rotation ?? playerData.targetRotation
+            if (data.isActing !== undefined) playerData.isActing = data.isActing
+            if (data.actionType !== undefined) playerData.actionType = data.actionType
+            if (data.actionPlotId !== undefined) playerData.actingPlotId = data.actionPlotId
         }
     }
 
@@ -2504,12 +2507,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     const targetCamX = myX + Math.sin(frontSideAngle) * camDistance
                     const targetCamZ = myZ + Math.cos(frontSideAngle) * camDistance
 
-                    // Smoothly transition if needed, or just set it
-                    // Lerping is better but simple set is robust
-                    // Let's Lerp for smoothness
-                    camera.position.x = Utils.lerp(camera.position.x, targetCamX, 0.1)
-                    camera.position.y = Utils.lerp(camera.position.y, camHeight, 0.1)
-                    camera.position.z = Utils.lerp(camera.position.z, targetCamZ, 0.1)
+                    // Immediate snap (No Lerp)
+                    camera.position.set(targetCamX, camHeight, targetCamZ)
 
                     // Look at player center
                     // We need a dummy target to interp lookAt? 
