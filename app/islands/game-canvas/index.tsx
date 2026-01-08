@@ -6,6 +6,8 @@ import * as MeshFactories from './meshFactories'
 import * as UIGenerators from './uiGenerators'
 import * as LobbyManager from './lobbyManager'
 import * as RealmManager from './realmManager'
+import * as SelectionCard from './selectionCard'
+import { FarmingUI } from './farmingUI'
 
 export default function GameCanvas({ userId, firstName, username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete }: Types.GameCanvasProps) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -118,6 +120,16 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         text-transform: uppercase;
     `
     document.body.appendChild(interactBtn)
+
+    // Initialize Farming UI
+    const farmingUI = new FarmingUI({
+        interactBtn,
+        onSendMessage: (msg) => {
+            if (wsConnected && ws) {
+                ws.send(JSON.stringify(msg))
+            }
+        }
+    })
 
     // Scene Modes
     let spectateRotationOffset = 0
@@ -465,9 +477,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     reconnectOverlay.appendChild(reconnectText)
     document.body.appendChild(reconnectOverlay)
 
-    function connectWebSocket(isInitial: boolean = false, bypassCharacterCheck: boolean = false) {
+    function connectWebSocket(isInitial: boolean = false) {
         if (isVersionMismatch) return
-        if (currentMode === 'character' && !bypassCharacterCheck) return
+        if (currentMode === 'character') return
         if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
 
         reconnectText.innerText = isInitial ? 'Connecting...' : 'Attempting to re-establish connection...'
@@ -731,7 +743,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 setTimeout(() => connectWebSocket(true), 500)
             } else if (data.type === 'player_realm_info') {
                 // Response to get_player_realm query
-                console.log('Received player_realm_info:', data, 'currentMode:', currentMode)
                 if (data.realmId && currentMode === 'character') {
                     // Player has an active realm! Reconnect them
                     console.log('Reconnecting to active realm:', data.realmId)
@@ -907,31 +918,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
     function updateFarmPlots(plots: any[]) {
         farmPlotsState = plots
-        if (!lobbyState) return
-        plots.forEach((plot: any, index: number) => {
-            if (index >= lobbyState!.farmPlotGroups.length) return
-            const group = lobbyState!.farmPlotGroups[index]
-            const growthStage = plot.growthStage || 0
-            if (growthStage === 0) {
-                if (farmPlotWheat[index]) {
-                    group.remove(farmPlotWheat[index])
-                    farmPlotWheat[index] = null
-                }
-            } else {
-                let needsUpdate = false
-                if (!farmPlotWheat[index]) needsUpdate = true
-                else if (farmPlotWheat[index].userData.stage !== growthStage) {
-                    group.remove(farmPlotWheat[index])
-                    needsUpdate = true
-                }
-                if (needsUpdate) {
-                    const wheat = MeshFactories.createWheatMesh(growthStage)
-                    wheat.userData.stage = growthStage
-                    group.add(wheat)
-                    farmPlotWheat[index] = wheat
-                }
-            }
-        })
+        farmingUI.updateFarmPlots(plots, lobbyState, farmPlotWheat)
     }
 
     function updatePlayerWeapon(playerData: Types.PlayerData, newWeapon: string | null) {
@@ -1004,9 +991,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         if (!playerData) return
 
         if (data.isActing !== undefined) {
-            playerData.isActing = data.isActing
-            playerData.actionType = data.actionType
-            playerData.actingPlotId = data.actionPlotId
+            // Only update action state for other players. For local player, we manage this state optimistically
+            // to prevents server updates from cancelling animations early
+            if (!isMe) {
+                playerData.isActing = data.isActing
+                playerData.actionType = data.actionType
+                playerData.actingPlotId = data.actionPlotId
+            }
         }
 
         const currentDisplayName = (playerData.username && playerData.username.trim() !== '') ? playerData.username : (playerData.firstName || 'Player')
@@ -1301,133 +1292,41 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         }
     }
 
-    // UI Styling
-    const style = document.createElement('style')
-    style.innerHTML = `
-      #selection-card {
-        position: fixed;
-        background: rgba(0, 0, 0, 0.65);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 20px;
-        padding: 24px;
-        display: none;
-        flex-direction: column;
-        gap: 16px;
-        z-index: 100;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-      }
-      @media (min-width: 769px) {
-        #selection-card {
-          right: 60px;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 320px;
+    // Selection Card (Character Customization)
+    const selectionCardElements = SelectionCard.createSelectionCard({
+        initialUsername: myUsername || myFirstName || '',
+        initialGender: charGender,
+        initialFaceIndex: currentFaceIndex,
+        onGenderChange: (g) => {
+            charGender = g
+            myGender = g
+            updateCharacterGender()
+        },
+        onFaceChange: (i) => {
+            currentFaceIndex = i
+            updateCharacterFace()
+        },
+        onEnterWorld: async (username, gender, faceIndex) => {
+            myUsername = username
+            try {
+                const resp = await fetch('/api/user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, gender, faceIndex })
+                })
+                if (!resp.ok) console.error('Failed to sync user data')
+                const nameLabel = document.getElementById('player-name-label')
+                if (nameLabel) nameLabel.innerText = username || myFirstName
+            } catch (err) {
+                console.error('Error syncing user data:', err)
+            }
+            currentMode = 'game'
+            updateUIVisibility()
+            connectWebSocket(true)
         }
-      }
-      @media (max-width: 768px) {
-        #selection-card {
-          bottom: 30px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 85%;
-          max-width: 380px;
-        }
-      }
-      .card-section { display: flex; flex-direction: column; gap: 8px; }
-      .card-label {
-        color: rgba(255,255,255,0.5);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        font-weight: 700;
-        margin-left: 4px;
-      }
-      .card-input {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 12px;
-        color: white;
-        padding: 14px 16px;
-        font-size: 16px;
-        width: 100%;
-        box-sizing: border-box;
-        font-family: inherit;
-        outline: none;
-        transition: all 0.2s;
-      }
-      .card-input:focus {
-        border-color: #FFD54F;
-        background: rgba(255,255,255,0.1);
-      }
-      .card-btn {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 12px;
-        color: white;
-        padding: 14px 16px;
-        font-size: 16px;
-        cursor: pointer;
-        transition: all 0.2s;
-        font-weight: 500;
-        width: 100%;
-        text-align: left;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-family: inherit;
-      }
-      .card-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
-      .card-play-btn {
-        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-        color: white;
-        border: none;
-        border-radius: 14px;
-        padding: 18px;
-        font-size: 18px;
-        font-weight: 800;
-        cursor: pointer;
-        box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
-        transition: all 0.2s;
-        width: 100%;
-        text-align: center;
-        margin-top: 8px;
-        font-family: inherit;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-      }
-      .card-play-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(76, 175, 80, 0.5); }
-      .card-play-btn:active { transform: translateY(1px); }
-    `
-    document.head.appendChild(style)
-
-    const selectionCard = document.createElement('div')
-    selectionCard.id = 'selection-card'
-    document.body.appendChild(selectionCard)
-
-    // Name Section
-    const nameSection = document.createElement('div')
-    nameSection.className = 'card-section'
-    nameSection.innerHTML = '<span class="card-label">Identity</span>'
-    selectionCard.appendChild(nameSection)
-
-    // Gender Section
-    const genderSection = document.createElement('div')
-    genderSection.className = 'card-section'
-    genderSection.innerHTML = '<span class="card-label">Physique</span>'
-    selectionCard.appendChild(genderSection)
-
-    // Face Section
-    const faceSection = document.createElement('div')
-    faceSection.className = 'card-section'
-    faceSection.innerHTML = '<span class="card-label">Appearance</span>'
-    selectionCard.appendChild(faceSection)
-
-    const faceBtn = document.createElement('button')
-    faceBtn.className = 'card-btn'
-    faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
-    faceSection.appendChild(faceBtn)
+    })
+    const selectionCard = selectionCardElements.card
+    const usernameInput = selectionCardElements.usernameInput
 
     function switchToMode(mode: 'game' | 'character' | 'spectate' | 'congratulations') {
         currentMode = mode
@@ -1449,97 +1348,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     }
 
     function startFarmingAction(type: 'planting' | 'watering' | 'harvesting', plotId: number) {
-        if (!myPlayerId) return
-        const p = players.get(myPlayerId)
-        if (!p || p.isActing) return
-        p.isActing = true
-        p.actionType = type
-        p.actingPlotId = plotId
-        p.actingStartTime = Date.now()
-        interactBtn.innerText = type.charAt(0).toUpperCase() + type.slice(1) + '...'
-        interactBtn.style.background = 'transparent'
-        interactBtn.style.border = 'none'
-        interactBtn.style.boxShadow = 'none'
-        interactBtn.style.color = 'white'
-        interactBtn.style.textShadow = '0 0 4px black'
-        interactBtn.onclick = null
-        if (wsConnected && ws) {
-            const serverType = type === 'planting' ? 'plant_seeds' : (type === 'watering' ? 'water_wheat' : 'harvest_wheat')
-            ws.send(JSON.stringify({ type: serverType, plotId }))
-        }
-        setTimeout(() => {
-            const currentP = players.get(myPlayerId!)
-            if (currentP && currentP.isActing && currentP.actionType === type) {
-                currentP.isActing = false
-                currentP.actionType = null
-                currentP.actingPlotId = null
-                if (currentP.temporaryToolMesh) {
-                    if (currentP.temporaryToolMesh.parent) currentP.temporaryToolMesh.parent.remove(currentP.temporaryToolMesh)
-                    currentP.temporaryToolMesh = null
-                }
-                if (currentP.weaponMesh) currentP.weaponMesh.visible = true
-                currentP.mesh.traverse((child: any) => {
-                    if (child.name === 'staff_beginner' && currentP.weapon === 'staff_beginner') child.visible = true
-                })
-                updateUIVisibility()
-            }
-        }, 2000)
+        farmingUI.startFarmingAction(type, plotId, myPlayerId, players, updateUIVisibility)
     }
-
-    faceBtn.addEventListener('click', () => {
-        currentFaceIndex = (currentFaceIndex + 1) % MeshFactories.charFaces.length
-        faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
-        updateCharacterFace()
-    })
-
-    const usernameInput = document.createElement('input')
-    usernameInput.type = 'text'
-    usernameInput.placeholder = 'Enter Username'
-    usernameInput.value = myUsername || myFirstName || ''
-    usernameInput.maxLength = 16
-    usernameInput.className = 'card-input'
-    nameSection.appendChild(usernameInput)
-    usernameInput.addEventListener('input', () => {
-        usernameInput.value = usernameInput.value.replace(/[^a-zA-Z0-9 ]/g, '')
-    })
-
-    const playBtn = document.createElement('button')
-    playBtn.innerText = 'ENTER WORLD'
-    playBtn.className = 'card-play-btn'
-    selectionCard.appendChild(playBtn)
-    playBtn.addEventListener('click', async () => {
-        myUsername = usernameInput.value.trim()
-        try {
-            const resp = await fetch('/api/user', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    username: myUsername,
-                    gender: charGender,
-                    faceIndex: currentFaceIndex
-                })
-            })
-            if (!resp.ok) console.error('Failed to sync user data')
-            const nameLabel = document.getElementById('player-name-label')
-            if (nameLabel) nameLabel.innerText = myUsername || myFirstName
-        } catch (err) {
-            console.error('Error syncing user data:', err)
-        }
-        currentMode = 'game'
-        updateUIVisibility()
-        connectWebSocket(true)
-    })
-
-    const charGenderBtn = document.createElement('button')
-    charGenderBtn.className = 'card-btn'
-    charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${charGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${charGender.toUpperCase()}</span>`
-    genderSection.appendChild(charGenderBtn)
-    charGenderBtn.addEventListener('click', () => {
-        charGender = charGender === 'male' ? 'female' : 'male'
-        myGender = charGender
-        charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${charGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${charGender.toUpperCase()}</span>`
-        updateCharacterGender()
-    })
 
     const joystickContainer = document.createElement('div')
     joystickContainer.id = 'joystick-container'
@@ -2381,18 +2191,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         }
 
-        farmPlotWheat.forEach((group, index) => {
-            if (group && group.userData.stage === 3) {
-                const isBeingHarvested = Array.from(players.values()).some(p => p.isActing && p.actionType === 'harvesting' && p.actingPlotId === index)
-                const intensity = isBeingHarvested ? 0.3 : 0.05
-                const speedMult = isBeingHarvested ? 4 : 1
-                group.children.forEach((stalkContainer: any) => {
-                    const phase = stalkContainer.userData.phase || 0
-                    stalkContainer.rotation.x = Math.sin(now * 0.002 * speedMult + phase) * intensity
-                    stalkContainer.rotation.z = Math.cos(now * 0.0015 * speedMult + phase) * intensity
-                })
-            }
-        })
+        // Animate wheat swaying
+        farmingUI.animateWheat(farmPlotWheat, players, now)
 
         for (const [id, playerData] of players.entries()) {
             if (id !== myPlayerId) {
@@ -2446,41 +2246,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                             }
                         }
                     }
-                    if (playerData.isActing) {
-                        playerData.mesh.rotation.x = 0
-                        if (playerData.weaponMesh) playerData.weaponMesh.visible = false
-                        playerData.mesh.traverse((child: any) => {
-                            if (child.name === 'staff_beginner') child.visible = false
-                        })
-                        if (!playerData.temporaryToolMesh) {
-                            let tool: any
-                            if (playerData.actionType === 'watering') tool = MeshFactories.createWaterCanMesh()
-                            else tool = MeshFactories.createTrowelMesh()
-                            tool.scale.set(3, 3, 3)
-                            const handBone = playerData.mesh.getObjectByName('leftHand')
-                            if (handBone) {
-                                tool.rotation.set(0, -Math.PI / 2, Math.PI / 2)
-                                handBone.add(tool)
-                            } else {
-                                tool.position.set(-0.5, 1.5, 0.5)
-                                playerData.mesh.add(tool)
-                            }
-                            playerData.temporaryToolMesh = tool
-                        }
-                        if (playerData.actionType === 'watering' && playerData.temporaryToolMesh) {
-                            playerData.temporaryToolMesh.rotation.x = -Math.PI / 4
-                        }
-                    } else {
-                        playerData.mesh.rotation.x = 0
-                        if (playerData.weaponMesh) playerData.weaponMesh.visible = true
-                        playerData.mesh.traverse((child: any) => {
-                            if (child.name === 'staff_beginner' && playerData.weapon === 'staff_beginner') child.visible = true
-                        })
-                        if (playerData.temporaryToolMesh) {
-                            if (playerData.temporaryToolMesh.parent) playerData.temporaryToolMesh.parent.remove(playerData.temporaryToolMesh)
-                            playerData.temporaryToolMesh = null
-                        }
-                    }
+                    // Update farming tool meshes
+                    farmingUI.updateToolMeshForPlayer(playerData, THREE)
                     if (playerData.weaponMesh && !playerData.mesh.getObjectByName('hand_R')) {
                         playerData.weaponMesh.rotation.y += 0.02
                         playerData.weaponMesh.position.y = 2.0 + Math.sin(now * 0.003) * 0.1
@@ -2513,49 +2280,18 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     }
                 }
             }
-            if (playerData && playerData.isActing) {
-                playerData.mesh.rotation.x = 0
-                if (playerData.weaponMesh) playerData.weaponMesh.visible = false
-                playerData.mesh.traverse((child: any) => {
-                    if (child.name === 'staff_beginner') child.visible = false
-                })
-                if (!playerData.temporaryToolMesh) {
-                    let tool: any
-                    if (playerData.actionType === 'watering') tool = MeshFactories.createWaterCanMesh()
-                    else tool = MeshFactories.createTrowelMesh()
-                    tool.scale.set(3, 3, 3)
-                    const handBone = playerData.mesh.getObjectByName('leftHand')
-                    if (handBone) {
-                        tool.rotation.set(0, -Math.PI / 2, Math.PI / 2)
-                        handBone.add(tool)
-                    } else {
-                        tool.position.set(-0.5, 1.5, 0.5)
-                        playerData.mesh.add(tool)
-                    }
-                    playerData.temporaryToolMesh = tool
-                }
-                if (playerData.actionType === 'watering' && playerData.temporaryToolMesh) {
-                    playerData.temporaryToolMesh.rotation.x = -Math.PI / 4
-                }
-            } else if (playerData) {
-                playerData.mesh.rotation.x = 0
-                if (playerData.weaponMesh) playerData.weaponMesh.visible = true
-                playerData.mesh.traverse((child: any) => {
-                    if (child.name === 'staff_beginner' && playerData.weapon === 'staff_beginner') child.visible = true
-                })
-                if (playerData.temporaryToolMesh) {
-                    if (playerData.temporaryToolMesh.parent) playerData.temporaryToolMesh.parent.remove(playerData.temporaryToolMesh)
-                    playerData.temporaryToolMesh = null
-                }
+            if (playerData) {
+                // Update farming tool meshes for local player
+                farmingUI.updateToolMeshForPlayer(playerData, THREE)
             }
         }
 
         const speedVal = Constants.PLAYER_SPEED * delta
         const isTargetedByDragon = dragon && !dragon.isDead && dragon.targetId === myPlayerId
         const localPlayer = myPlayerId ? players.get(myPlayerId) : null
-        const isActing = localPlayer?.isActing || false
 
-        if (myPlayerId && !myIsDead && currentMode === 'game' && !isModalOpen && !isTargetedByDragon && !isActing) {
+        // Check acting state directly - don't cache it since it can change mid-frame from button clicks
+        if (myPlayerId && !myIsDead && currentMode === 'game' && !isModalOpen && !isTargetedByDragon && !localPlayer?.isActing) {
             let nearShop = false
             let nearPlotIndex = -1
             let nearPanel = false
@@ -2600,81 +2336,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     }
                 }
             } else if (nearPlotIndex !== -1) {
-                const plotData = farmPlotsState[nearPlotIndex]
-                const stage = plotData?.growthStage || 0
-                interactBtn.style.display = 'block'
-                if (stage === 0) {
-                    const hasSeeds = inventory.includes('wheat_seeds')
-                    const hasTrowel = inventory.includes('trowel')
-                    if (!hasSeeds) {
-                        interactBtn.innerText = 'Need seeds'
-                        interactBtn.style.background = '#9CA3AF'
-                        interactBtn.style.border = '2px solid #4B5563'
-                        interactBtn.style.boxShadow = 'none'
-                        interactBtn.style.color = 'white'
-                        interactBtn.style.textShadow = 'none'
-                        interactBtn.onclick = null
-                    } else if (!hasTrowel) {
-                        interactBtn.innerText = 'Need trowel'
-                        interactBtn.style.background = '#9CA3AF'
-                        interactBtn.style.border = '2px solid #4B5563'
-                        interactBtn.style.boxShadow = 'none'
-                        interactBtn.style.color = 'white'
-                        interactBtn.style.textShadow = 'none'
-                        interactBtn.onclick = null
-                    } else {
-                        interactBtn.innerText = 'PLANT WHEAT'
-                        interactBtn.style.background = '#A7F3D0'
-                        interactBtn.style.border = '2px solid black'
-                        interactBtn.style.boxShadow = 'inset 0 -3px 0 rgba(0,0,0,0.2)'
-                        interactBtn.style.color = 'black'
-                        interactBtn.style.textShadow = 'none'
-                        interactBtn.onclick = () => startFarmingAction('planting', nearPlotIndex)
-                    }
-                } else if (stage === 1) {
-                    const hasWaterCan = inventory.includes('water_can')
-                    if (!hasWaterCan) {
-                        interactBtn.innerText = 'Need water can'
-                        interactBtn.style.background = '#9CA3AF'
-                        interactBtn.style.border = '2px solid #4B5563'
-                        interactBtn.style.boxShadow = 'none'
-                        interactBtn.style.color = 'white'
-                        interactBtn.style.textShadow = 'none'
-                        interactBtn.onclick = null
-                    } else {
-                        interactBtn.innerText = 'WATER WHEAT'
-                        interactBtn.style.background = '#A7F3D0'
-                        interactBtn.style.border = '2px solid black'
-                        interactBtn.style.boxShadow = 'inset 0 -3px 0 rgba(0,0,0,0.2)'
-                        interactBtn.style.color = 'black'
-                        interactBtn.style.textShadow = 'none'
-                        interactBtn.onclick = () => startFarmingAction('watering', nearPlotIndex)
-                    }
-                } else if (stage === 2) {
-                    const GROWTH_TIME = 5 * 60 * 1000
-                    const elapsed = Date.now() - (plotData.wateredAt || 0)
-                    const remaining = Math.max(0, GROWTH_TIME - elapsed)
-                    const minutes = Math.floor(remaining / 60000)
-                    const seconds = Math.floor((remaining % 60000) / 1000)
-                    const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
-                    interactBtn.innerText = `GROWING... (${timeStr})`
-                    interactBtn.style.background = '#9CA3AF'
-                    interactBtn.style.border = '2px solid #4B5563'
-                    interactBtn.style.boxShadow = 'none'
-                    interactBtn.style.color = 'white'
-                    interactBtn.style.textShadow = 'none'
-                    interactBtn.onclick = null
-                } else if (stage === 3) {
-                    interactBtn.innerText = 'HARVEST WHEAT'
-                    interactBtn.style.background = '#A7F3D0'
-                    interactBtn.style.border = '2px solid black'
-                    interactBtn.style.boxShadow = 'inset 0 -3px 0 rgba(0,0,0,0.2)'
-                    interactBtn.style.color = 'black'
-                    interactBtn.style.textShadow = 'none'
-                    interactBtn.onclick = () => startFarmingAction('harvesting', nearPlotIndex)
-                } else {
-                    interactBtn.style.display = 'none'
-                }
+                // Handle farm plot proximity
+                farmingUI.checkFarmProximity(myX, myZ, myPlayerId, lobbyState, farmPlotsState, inventory, players, startFarmingAction)
             } else {
                 interactBtn.style.display = 'none'
             }
@@ -2688,7 +2351,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             } else {
                 spawnBtn.style.display = 'none'
             }
-        } else if (!isActing) {
+        } else if (!localPlayer?.isActing) {
             interactBtn.style.display = 'none'
             spawnBtn.style.display = 'none'
         }
@@ -2823,10 +2486,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     versionInterval = setInterval(checkVersion, 30000)
     checkVersion()
     switchToScene('lobby')
-
-    // Check for active realm BEFORE showing character screen
-    // This allows reconnection to realms if player refreshes mid-game
-    connectWebSocket(true, true)
 
     animate()
 }
