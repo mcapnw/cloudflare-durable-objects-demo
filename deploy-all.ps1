@@ -30,15 +30,6 @@ if ($content -match "CLIENT_VERSION = '([^']+)'") {
     exit 1
 }
 
-# Update database version
-Write-Host "Updating database version to $version..." -ForegroundColor Yellow
-npx wrangler d1 execute antigravity-db --remote --command="INSERT OR REPLACE INTO GameConfig (key, value) VALUES ('version', '$version')"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Failed to update database version" -ForegroundColor Red
-    exit 1
-}
-Write-Host "Database version updated!" -ForegroundColor Green
-
 # Deploy Pages application
 Write-Host "Deploying Pages application..." -ForegroundColor Yellow
 npm run deploy
@@ -56,6 +47,15 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 Write-Host "Durable Object deployed!" -ForegroundColor Green
+
+# Update database version (After deployments to prevent premature client refreshes)
+Write-Host "Updating database version to $version..." -ForegroundColor Yellow
+npx wrangler d1 execute antigravity-db --remote --command="INSERT OR REPLACE INTO GameConfig (key, value) VALUES ('version', '$version')"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Failed to update database version" -ForegroundColor Red
+    exit 1
+}
+Write-Host "Database version updated!" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "=== Deployment Complete! ===" -ForegroundColor Cyan

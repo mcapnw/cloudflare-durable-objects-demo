@@ -9,6 +9,7 @@ import { DragonManager } from './DragonManager'
 import { FarmManager } from './FarmManager'
 import { SheepManager } from './SheepManager'
 import { PlayerManager } from './PlayerManager'
+import { RealmGameManager } from './RealmGameManager'
 
 // Game constants
 const WORLD_BOUNDS = 25
@@ -44,6 +45,7 @@ export class GameRoomDurableObject implements DurableObject {
     // Realm State
     messageHandler: MessageHandler
     realmManager: RealmManager
+    realmGameManager: RealmGameManager
 
 
     constructor(state: DurableObjectState, env: Env) {
@@ -53,15 +55,33 @@ export class GameRoomDurableObject implements DurableObject {
         this.realmManager = new RealmManager(this)
         this.dragonManager = new DragonManager(this)
         this.farmManager = new FarmManager(this)
-        this.farmManager = new FarmManager(this)
         this.sheepManager = new SheepManager(this)
         this.playerManager = new PlayerManager(this)
+        this.realmGameManager = new RealmGameManager(this)
     }
 
     async fetch(request: Request) {
         const url = new URL(request.url)
 
         // Internal API for inter-DO communication (no WebSocket upgrade needed)
+        if (url.pathname === '/internal/init-realm') {
+            const data = await request.json() as any
+            console.log('[REALM-DO] Initializing realm with data:', data)
+            this.realmManager.isRealm = true
+            this.realmManager.realmExpiresAt = data.expiresAt
+            this.realmManager.initialized = true
+
+            // Update PlayerManager with roles (pre-seeding)
+            if (data.roles) {
+                for (const p of data.roles) {
+                    // We store these 'pending roles' in RealmManager or pre-seed PlayerManager?
+                    // PlayerManager usually manages active connections.
+                    // But we can store a map of "expected roles" in RealmManager
+                    this.realmManager.assignedRoles.set(p.playerId, p.role)
+                }
+            }
+            return new Response('OK')
+        }
         if (url.pathname === '/internal/stats') {
             // Clean up expired realms first
             // Clean up expired realms first
@@ -177,12 +197,16 @@ export class GameRoomDurableObject implements DurableObject {
                 return
             }
 
+            // Cooperative Game Logic
+            this.realmGameManager.update(now)
+
             if (this.realmManager.isRealm) {
                 this.broadcast({
                     type: 'world_update',
                     players: players,
                     realmTime: Math.max(0, Math.ceil((this.realmManager.realmExpiresAt - now) / 1000)),
-                    activeRealmCount: this.realmManager.activeRealms.size
+                    activeRealmCount: this.realmManager.activeRealms.size,
+                    ponds: this.realmGameManager.ponds
                 })
                 return
             }

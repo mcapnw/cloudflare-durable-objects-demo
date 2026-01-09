@@ -8,6 +8,7 @@ import * as LobbyManager from './lobbyManager'
 import * as RealmManager from './realmManager'
 import * as SelectionCard from './selectionCard'
 import { FarmingUI } from './farmingUI'
+import { FishingUI } from './fishingUI'
 
 export default function GameCanvas({ userId, firstName, username, email, gender, faceIndex, initialCoins, initialInventory, tutorialComplete, activeRealmId, serverVersion }: Types.GameCanvasProps & { activeRealmId?: string | null }) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -49,6 +50,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     let coins = initialCoins
     let inventory = initialInventory
     let farmPlotsState: any[] = []
+    let pondsState: any[] = []
+    let pondIndicators: any[] = []
 
     let currentRoomId = initialActiveRealmId || null
     let isInRealm = !!initialActiveRealmId
@@ -139,6 +142,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             if (jContainer) jContainer.style.display = visible ? 'block' : 'none'
         }
     })
+
+    let fishingUI: FishingUI
 
     // Scene Modes
     let spectateRotationOffset = 0
@@ -496,6 +501,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     reconnectOverlay.appendChild(reconnectText)
     document.body.appendChild(reconnectOverlay)
 
+    function clearRealmAssets() {
+        console.log('[Cleanup] Clearing Realm assets (Ponds)...')
+        pondsState = []
+        pondIndicators.forEach(p => scene.remove(p))
+        pondIndicators = []
+    }
+
     function connectWebSocket(isInitial: boolean = false) {
         if (isVersionMismatch) return
         if (currentMode === 'character') return
@@ -505,13 +517,12 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         reconnectOverlay.style.display = 'flex'
 
         const params = new URLSearchParams()
-        params.append('id', myUserId)  // CRITICAL: Include player ID for location persistence
+        params.append('id', myUserId)
         params.append('faceIndex', currentFaceIndex.toString())
         params.append('gender', charGender)
         params.append('username', myUsername || '')
         params.append('firstName', myFirstName || '')
         if (currentRoomId) params.append('room', currentRoomId)
-
 
         ws = new WebSocket(`${wsUrl}?${params.toString()}`)
 
@@ -520,6 +531,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             console.log('WebSocket connected')
             reconnectOverlay.style.display = 'none'
             checkVersion()
+
+            // If we are connecting (and it's not a reconnect to an active room), assume Lobby logic might apply first.
+            // But 'welcome' will confirm.
 
             // Query if player has an active realm session
             if (!currentRoomId && ws) {
@@ -540,6 +554,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data)
             if (data.type === 'scores') {
+                // ... (scores logic same as before)
                 const list = data.scores.map((s: any, i: number) => {
                     const displayName = (s.username && s.username !== 'null' && s.username.trim() !== '') ? s.username : (s.first_name || 'Anonymous')
                     return `
@@ -580,6 +595,10 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     setTimeout(() => connectWebSocket(true), 100)
                     return // Stop processing welcome message
                 }
+
+                // We are in Lobby (or failed to join realm)
+                // Clear any Realm Assets
+                clearRealmAssets()
 
                 myPlayerId = data.id
                 myX = data.x || 0
@@ -647,6 +666,10 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 if (data.pickups) updatePickups(data.pickups)
                 if (data.sheeps) updateSheeps(data.sheeps)
                 if (data.farmPlots) updateFarmPlots(data.farmPlots)
+                if (data.ponds) {
+                    pondsState = data.ponds
+                    updatePondIndicators()
+                }
                 if (data.players) data.players.forEach((p: any) => updatePlayer(p, p.id === myPlayerId))
 
                 if (data.realmTime !== undefined) {
@@ -790,6 +813,15 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     wsConnected = false
                     setTimeout(() => connectWebSocket(true), 500)
                 }
+            } else if (data.type === 'pond_update') {
+                pondsState = data.ponds
+                updatePondIndicators()
+            } else if (data.type === 'pass_fish_start') {
+                if (fishingUI) fishingUI.handlePassFishAnimation(data.fisherId, data.cookerId, data.duration, players)
+            } else if (data.type === 'pass_fish_complete') {
+                // Handled by state update
+            } else if (data.type === 'fishing_complete') {
+                // Handled by state update
             }
         }
     }
@@ -958,32 +990,107 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
     function updatePlayerWeapon(playerData: Types.PlayerData, newWeapon: string | null) {
         playerData.weapon = newWeapon
+
+        // Hide/Show Staff
         playerData.mesh.traverse((child: any) => {
             if (child.name === 'staff_beginner') {
-                child.visible = (newWeapon === 'staff_beginner')
+                // Only show staff if generic weapon OR staff_beginner AND NOT Fisher (Fishers use pole)
+                const isFisher = playerData.role === 'Fisher'
+                child.visible = (newWeapon === 'staff_beginner') && !isFisher
                 if (child.visible) child.frustumCulled = false
             }
         })
+
+        // Clear external mesh if valid
         if (playerData.weaponMesh) {
-            const handBone = playerData.mesh.getObjectByName('hand_R')
-            if (handBone) handBone.remove(playerData.weaponMesh)
-            else playerData.mesh.remove(playerData.weaponMesh)
+            const parent = playerData.weaponMesh.parent
+            if (parent) parent.remove(playerData.weaponMesh)
             playerData.weaponMesh = null
         }
-        if (newWeapon && newWeapon !== 'staff_beginner') {
-            const wMesh = MeshFactories.createWeaponMesh(newWeapon)
-            const handBone = playerData.mesh.getObjectByName('hand_R')
-            if (handBone) {
-                wMesh.position.set(0, 0, 0)
-                wMesh.scale.set(3, 3, 3)
-                wMesh.rotation.set(0, -Math.PI / 2, Math.PI / 2)
-                handBone.add(wMesh)
+
+        // Force hide default staff if Fisher (in case it persists from base model)
+        if (playerData.role === 'Fisher') {
+            playerData.mesh.traverse((child: any) => {
+                if (child.name === 'staff_beginner' || child.name.includes('staff')) {
+                    child.visible = false
+                }
+            })
+        }
+
+        // Logic for Custom Meshes (Weapons, Pole, Fish)
+        let meshToCreate = null
+
+        if (playerData.role === 'Fisher') {
+            if (playerData.heldItem === 'fish') {
+                meshToCreate = MeshFactories.createFishMesh()
             } else {
-                wMesh.position.set(-0.5, 1.5, 0.5)
-                wMesh.scale.set(2.0, 2.0, 2.0)
-                playerData.mesh.add(wMesh)
+                meshToCreate = MeshFactories.createFishingPoleMesh()
             }
-            playerData.weaponMesh = wMesh
+        } else if (playerData.role === 'Cooker' && playerData.heldItem === 'fish') {
+            meshToCreate = MeshFactories.createFishMesh()
+        } else if (newWeapon && newWeapon !== 'staff_beginner') {
+            meshToCreate = MeshFactories.createWeaponMesh(newWeapon)
+        }
+
+        if (meshToCreate) {
+            // Helper to find bone recursively
+            const findBone = (obj: any, name: string): any | null => {
+                if (obj.name === name || obj.name.includes(name)) return obj
+                for (const child of obj.children) {
+                    const found = findBone(child, name)
+                    if (found) return found
+                }
+                return null
+            }
+
+            // Expanded Bone Search
+            let handBone = playerData.mesh.getObjectByName('RightHand') ||
+                playerData.mesh.getObjectByName('mixamorigRightHand') ||
+                playerData.mesh.getObjectByName('hand_R') ||
+                playerData.mesh.getObjectByName('mixamorig:RightHand')
+
+            if (!handBone) {
+                // Try deep search for any "RightHand"
+                handBone = findBone(playerData.mesh, 'RightHand')
+            }
+
+            if (handBone) {
+                console.log('[Visuals] Attaching weapon/tool to bone:', handBone.name)
+
+                // Determine if custom tool (Pole/Fish) or standard
+                const isCustomTool = (playerData.role === 'Fisher' && !playerData.heldItem)
+
+                if (isCustomTool) {
+                    // Fishing Pole Specifics
+                    meshToCreate.position.set(0, 0, 0)
+                    meshToCreate.rotation.set(0, 0, 0)
+                    // Tune rotation for Mixamo Right Hand (Thumb +X, Fingers +Z usually)
+                    // Pole is Y-up.
+                    meshToCreate.rotation.x = -Math.PI / 2
+                    meshToCreate.rotation.y = -Math.PI / 2
+                } else if (playerData.heldItem === 'fish') {
+                    meshToCreate.position.set(0, 0.4, 0)
+                    meshToCreate.scale.set(0.5, 0.5, 0.5)
+                } else {
+                    // Standard Weapon
+                    meshToCreate.position.set(0, 0, 0)
+                    meshToCreate.scale.set(3, 3, 3)
+                    meshToCreate.rotation.set(0, -Math.PI / 2, Math.PI / 2)
+                }
+
+                handBone.add(meshToCreate)
+            } else {
+                console.warn('[Visuals] Hand bone not found! Using body fallback.')
+                // Fallback
+                const isCustomTool = (playerData.role === 'Fisher' && !playerData.heldItem)
+                if (isCustomTool) {
+                    meshToCreate.position.set(0.3, 0.8, 0.5)
+                } else {
+                    meshToCreate.position.set(-0.5, 1.5, 0.5)
+                }
+                playerData.mesh.add(meshToCreate)
+            }
+            playerData.weaponMesh = meshToCreate
         }
     }
 
@@ -1040,11 +1147,19 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             ? ((data.username && data.username.trim() !== '') ? data.username : (data.firstName || playerData.firstName))
             : ((data.firstName && data.firstName !== playerData.firstName) ? data.firstName : currentDisplayName)
 
-        if (newDisplayName !== currentDisplayName) {
+        if (newDisplayName !== currentDisplayName || (data.role && data.role !== playerData.role)) {
             scene.remove(playerData.label)
             playerData.firstName = data.firstName ?? playerData.firstName
             playerData.username = data.username !== undefined ? data.username : playerData.username
-            playerData.label = UIGenerators.createTextSprite(THREE, newDisplayName, isMe)
+            // Update Label to include Role if present
+            let labelText = newDisplayName
+            // Use new role if provided, otherwise existing role
+            const role = data.role || playerData.role
+            if (role && role !== 'None') {
+                labelText = `[${role}] ${newDisplayName}`
+            }
+
+            playerData.label = UIGenerators.createTextSprite(THREE, labelText, isMe)
             scene.add(playerData.label)
         }
 
@@ -1066,8 +1181,14 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         }
 
         const weaponChanged = playerData.weapon !== (data.weapon || null)
-        const needsExternalMesh = playerData.weapon && playerData.weapon !== 'staff_beginner' && !playerData.weaponMesh
-        if (weaponChanged || needsExternalMesh) {
+        const roleChanged = playerData.role !== data.role
+        const itemChanged = playerData.heldItem !== data.heldItem
+
+        // Update data
+        playerData.role = data.role
+        playerData.heldItem = data.heldItem
+
+        if (weaponChanged || roleChanged || itemChanged) {
             updatePlayerWeapon(playerData, data.weapon || null)
         }
 
@@ -1156,6 +1277,35 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         }
         updateUIVisibility()
+    }
+
+    function updatePondIndicators() {
+        pondIndicators.forEach(p => scene.remove(p))
+        pondIndicators = []
+        pondsState.forEach(pond => {
+            const ind = MeshFactories.createPondIndicatorMesh()
+            ind.position.set(pond.x, 0.1, pond.z)
+            ind.userData.active = pond.active // Store for animation loop
+
+            const baseRing = ind.getObjectByName('baseRing') as any
+
+            if (pond.active) {
+                // Keep default blue glow (already in factory)
+                if (baseRing) {
+                    baseRing.material.color.setHex(0x00B0FF)
+                    baseRing.material.opacity = 0.8
+                }
+            } else {
+                // Change material to inactive
+                if (baseRing) {
+                    baseRing.material.color.setHex(0x555555) // Grey
+                    baseRing.material.opacity = 0.3
+                }
+            }
+
+            scene.add(ind)
+            pondIndicators.push(ind)
+        })
     }
 
     function updatePlayerTarget(data: any) {
@@ -1614,6 +1764,14 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     `
     joystickContainer.appendChild(joystickKnob)
     document.body.appendChild(joystickContainer)
+
+    fishingUI = new FishingUI({
+        interactBtn,
+        onSendMessage: (msg) => { if (ws && wsConnected) ws.send(JSON.stringify(msg)) },
+        setControlsEnabled: (enabled) => { if (!enabled) { joystickDeltaX = 0; joystickDeltaY = 0; } },
+        camera: camera,
+        setJoystickVisible: (v) => { if (joystickContainer) joystickContainer.style.display = v ? 'block' : 'none' }
+    })
 
     const shootBtn = document.createElement('div')
     shootBtn.id = 'shoot-btn'
@@ -2488,6 +2646,40 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             }
         }
 
+        // Animate Ponds (Ripples)
+        pondIndicators.forEach(p => {
+            if (p.userData.active) {
+                const ripple = p.getObjectByName('ripple')
+                if (ripple) {
+                    // Simple repeating ripple
+                    // Use a time-based phase offset per pond if desired, or just global time
+                    const t = (now % 2000) / 2000 // 0 to 1 over 2s
+                    const maxScale = 15.0 // Expands to cover pond (radius ~3.5 -> scale ~10+)
+                    // Ring geometry is small (0.3), so scale needs to be big or geometry big.
+                    // Geometry is 0.1-0.3. To reach 3.0, scale ~15.
+
+                    ripple.scale.setScalar(1 + t * 30)
+                    ripple.material.opacity = 0.8 * (1 - t) // Fade out
+                }
+                // Pulse the outer ring
+                const baseRing = p.getObjectByName('baseRing')
+                if (baseRing) {
+                    const pulse = 1.0 + Math.sin(now * 0.005) * 0.05
+                    baseRing.scale.setScalar(pulse)
+                    if (baseRing.material) baseRing.material.color.setHex(0x00B0FF) // Blue
+                }
+            } else {
+                const ripple = p.getObjectByName('ripple')
+                if (ripple) ripple.material.opacity = 0
+
+                const baseRing = p.getObjectByName('baseRing')
+                if (baseRing) {
+                    baseRing.scale.setScalar(1.0)
+                    // Inactive color provided in updatePondIndicators, ensure consistent
+                }
+            }
+        })
+
         // Animate wheat swaying
         farmingUI.animateWheat(farmPlotWheat, players, now)
 
@@ -2632,11 +2824,59 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         ws.send(JSON.stringify({ type: 'join_realm_lobby' }))
                     }
                 }
-            } else if (nearPlotIndex !== -1) {
-                // Handle farm plot proximity
-                farmingUI.checkFarmProximity(myX, myZ, myPlayerId, lobbyState, farmPlotsState, inventory, players, startFarmingAction)
             } else {
-                interactBtn.style.display = 'none'
+                // Check Fishing First (Realm)
+                let handled = false
+                if (fishingUI && localPlayer) {
+                    const fishingHandled = fishingUI.checkProximity(
+                        myPlayerId,
+                        players,
+                        pondsState,
+                        localPlayer.role,
+                        localPlayer.heldItem,
+                        myX,
+                        myZ
+                    )
+                    // Update on-screen debug overlay (for mobile)
+                    let debugOverlay = document.getElementById('fishing-debug-overlay') as HTMLDivElement
+                    if (!debugOverlay) {
+                        debugOverlay = document.createElement('div')
+                        debugOverlay.id = 'fishing-debug-overlay'
+                        debugOverlay.style.cssText = 'position:fixed;top:10px;left:10px;background:rgba(0,0,0,0.8);color:#0f0;font-family:monospace;font-size:12px;padding:10px;z-index:10000;max-width:320px;pointer-events:none;'
+                        document.body.appendChild(debugOverlay)
+                    }
+                    const activePond = pondsState.find(p => p.active)
+                    // Use myX/myZ (actual local position) not me.currentX (may be stale)
+                    const distToActive = activePond ? Math.hypot(myX - activePond.x, myZ - activePond.z).toFixed(1) : 'N/A'
+
+                    // Weapon debug
+                    const weaponInfo = localPlayer.weaponMesh ?
+                        `attached to: ${localPlayer.weaponMesh.parent?.name || 'body'}` :
+                        'none'
+
+                    debugOverlay.innerHTML = `
+                        <b>Fishing Debug</b><br>
+                        Role: ${localPlayer.role || 'undefined'}<br>
+                        HeldItem: ${localPlayer.heldItem || 'none'}<br>
+                        MyPos: (${myX.toFixed(1)}, ${myZ.toFixed(1)})<br>
+                        Ponds: ${pondsState.length}<br>
+                        Active Pond: ${activePond ? `(${activePond.x}, ${activePond.z})` : 'NONE'}<br>
+                        Dist to Active: ${distToActive}<br>
+                        Handled: ${fishingHandled}<br>
+                        <b>Weapon:</b> ${weaponInfo}
+                    `
+                    if (fishingHandled) handled = true
+                }
+
+                if (!handled && nearPlotIndex !== -1) {
+                    // Handle farm plot proximity
+                    farmingUI.checkFarmProximity(myX, myZ, myPlayerId, lobbyState, farmPlotsState, inventory, players, startFarmingAction)
+                    handled = true
+                }
+
+                if (!handled) {
+                    interactBtn.style.display = 'none'
+                }
             }
             if (nearPanel) {
                 spawnBtn.style.display = 'block'
@@ -2820,6 +3060,16 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             const dist = camera.position.distanceTo(currentCountdownLabel.position)
             const scaleFactor = Math.max(0.1, dist / 12)
             currentCountdownLabel.scale.set(4 * scaleFactor, 1 * scaleFactor, 1)
+        }
+        if (myPlayerId && isInRealm) {
+            const farmingInteraction = farmingUI.checkFarmProximity(myX, myZ, myPlayerId, lobbyState, farmPlotsState, inventory, players, (t, id) => startFarmingAction(t, id))
+
+            // If not farming, check fishing
+            if (farmingInteraction === -1 && fishingUI) {
+                // Assuming my role is available in players map
+                const me = players.get(myPlayerId)
+                fishingUI.checkProximity(myPlayerId, players, pondsState, me?.role, me?.heldItem, myX, myZ)
+            }
         }
         renderer.render(scene, camera)
     }

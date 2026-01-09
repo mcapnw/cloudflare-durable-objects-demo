@@ -704,3 +704,122 @@ export function spawnFragments(x: number, y: number, z: number, color: number): 
     }
     return newFragments
 }
+
+export function createFishingPoleMesh(): any {
+    const group = new THREE.Group()
+
+    // Rod - Centered at grip (approximately bottom 1/10th)
+    const rodGeo = new THREE.CylinderGeometry(0.03, 0.05, 3.0, 8)
+    const rodMat = new THREE.MeshStandardMaterial({ color: 0x8D6E63 })
+    const rod = new THREE.Mesh(rodGeo, rodMat)
+    // Rotate to point forward/upward.
+    // Standard grip: held horizontal or slightly up. 
+    rod.rotation.x = Math.PI / 2 // Point Z-forward? Or Y-up? 
+    // If we attach to hand (palm local Y or Z usually), we want rod to extend out.
+    // Let's align it with Y axis (up) first, but shift it so handle is at origin.
+    // Cylinder default is Y-axis centered.
+    // Move it up by half-height - grip offset (0.2)
+    rod.position.y = 1.3
+    // Now rotate it to be angled 45 degrees forward RELATIVE TO GRIP
+    rod.rotation.set(Math.PI / 4, 0, 0)
+
+    // Actually simpler: Keep rod consistent with previous "look" but just move group origin.
+    // Previous: rod.position.set(0, 1.5, 1.0)
+    // New: We want that "grip point" to be (0,0,0).
+    // Let's approximate grip point as (0, 0.5, 0) relative to previous. 
+    // Better: Just make the rod local origin the handle.
+    // Cylinder height 3.0. Handle at bottom.
+    // Move rod up by 1.5. 
+    rod.position.set(0, 1.5, 0) // Centered on Y axis, bottom at 0.
+    rod.rotation.set(Math.PI / 4, 0, 0) // Tilted forward.
+
+    group.add(rod)
+
+    // Tip position calculation:
+    // Base at (0,0,0). Length 3.0. Tilted 45deg (PI/4).
+    // Top is at y = 3 * cos(45) = 2.12, z = 3 * sin(45) = 2.12
+    const tipY = 2.12
+    const tipZ = 2.12
+
+    // Line
+    const lineGeo = new THREE.CylinderGeometry(0.005, 0.005, 1.5, 4)
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.6 })
+    const line = new THREE.Mesh(lineGeo, lineMat)
+    line.position.set(0, tipY - 0.75, tipZ) // Hangs down from tip
+    group.add(line)
+
+    // Bobber
+    const bobberGeo = new THREE.SphereGeometry(0.1, 8, 8)
+    const bobberMat = new THREE.MeshStandardMaterial({ color: 0xFF0000 })
+    const bobber = new THREE.Mesh(bobberGeo, bobberMat)
+    bobber.position.set(0, tipY - 1.5, tipZ)
+    group.add(bobber)
+
+    return group
+}
+
+export function createFishMesh(): any {
+    const group = new THREE.Group()
+    const color = 0x4FC3F7
+    const mat = new THREE.MeshStandardMaterial({ color })
+
+    // Body
+    const bodyGeo = new THREE.CapsuleGeometry(0.2, 0.6, 4, 8)
+    const body = new THREE.Mesh(bodyGeo, mat)
+    body.rotation.z = Math.PI / 2
+    group.add(body)
+
+    // Tail
+    const tailGeo = new THREE.ConeGeometry(0.2, 0.3, 4)
+    const tail = new THREE.Mesh(tailGeo, mat)
+    tail.rotation.z = -Math.PI / 2
+    tail.position.x = -0.5
+    group.add(tail)
+
+    return group
+}
+
+export function createPondIndicatorMesh(): any {
+    const group = new THREE.Group()
+
+    // Water Surface (Always visible)
+    const waterGeo = new THREE.CircleGeometry(3.2, 32)
+    const waterMat = new THREE.MeshBasicMaterial({
+        color: 0x0288D1, // Deep blue
+        transparent: true,
+        opacity: 0.5,
+        side: THREE.DoubleSide
+    })
+    const water = new THREE.Mesh(waterGeo, waterMat)
+    water.rotation.x = -Math.PI / 2
+    group.add(water)
+
+    // Glowing Ring (Base Ring)
+    const ringGeo = new THREE.RingGeometry(3.0, 3.5, 32)
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x00B0FF,
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide
+    })
+    const ring = new THREE.Mesh(ringGeo, ringMat)
+    ring.rotation.x = -Math.PI / 2
+    ring.name = 'baseRing'
+    group.add(ring)
+
+    // Ripple Ring (For animation)
+    const rippleGeo = new THREE.RingGeometry(0.1, 0.3, 32)
+    const rippleMat = new THREE.MeshBasicMaterial({
+        color: 0xFFFFFF,
+        transparent: true,
+        opacity: 0.0, // Start invisible
+        side: THREE.DoubleSide
+    })
+    const ripple = new THREE.Mesh(rippleGeo, rippleMat)
+    ripple.rotation.x = -Math.PI / 2
+    ripple.position.y = 0.05 // Slightly above water
+    ripple.name = 'ripple'
+    group.add(ripple)
+
+    return group
+}

@@ -1,5 +1,5 @@
 import { GameRoomDurableObject } from './GameRoom'
-import { Player } from './game-logic/types'
+import { Player, PlayerRole } from './game-logic/types'
 
 export class RealmManager {
     // Realm State - Extracted from GameRoom
@@ -8,6 +8,7 @@ export class RealmManager {
     realmExpiresAt: number = 0
     activeRealms: Map<string, number> = new Map() // Track active realm IDs with expiry timestamps (only used in global room)
     playerRealmMap: Map<string, { realmId: string, expiresAt: number }> = new Map() // Track which players are in which realms (only used in global room)
+    assignedRoles: Map<string, PlayerRole> = new Map() // Track roles assigned by lobby
 
     constructor(private gameRoom: GameRoomDurableObject) { }
 
@@ -21,8 +22,11 @@ export class RealmManager {
 
         if (room && room !== 'global-room') {
             this.isRealm = true
+            // If realmExpiresAt is 0, it means we haven't received init-realm yet
+            // We set a default of 5 minutes just in case, or wait?
+            // Better to default to 5 minutes to match user expectation if init fails
             if (this.realmExpiresAt === 0) {
-                this.realmExpiresAt = Date.now() + 30000 // 30 seconds
+                this.realmExpiresAt = Date.now() + 60000 // 1 minute
             }
             await this.loadActiveRealmsCount()
         } else {
@@ -126,13 +130,21 @@ export class RealmManager {
         // Clean up expired realms
         let realmsChanged = false
         for (const [realmId, expiresAt] of this.activeRealms.entries()) {
-            if (now > expiresAt) {
+            if (now > expiresAt + 5000) { // Add buffer to ensure it finished
                 this.activeRealms.delete(realmId)
                 realmsChanged = true
+
+                // Cleanup player mappings for this realm
+                for (const [pid, info] of this.playerRealmMap.entries()) {
+                    if (info.realmId === realmId) {
+                        this.playerRealmMap.delete(pid)
+                    }
+                }
             }
         }
         if (realmsChanged) {
             this.saveActiveRealms()
+            this.savePlayerRealms()
         }
 
         if (lobbyChanged) {
@@ -166,7 +178,8 @@ export class RealmManager {
 
             // Check start condition
             const readyCount = allPlayers.filter(p => p.ready).length
-            if (allPlayers.length >= 1 && readyCount === allPlayers.length) {
+            // Require at least 2 players to start
+            if (allPlayers.length >= 2 && readyCount === allPlayers.length) {
                 this.startRealm(allPlayers)
             }
         }
@@ -174,10 +187,50 @@ export class RealmManager {
 
     startRealm(players: { id: string }[]) {
         const newRealmId = crypto.randomUUID()
-        const realmExpiresAt = Date.now() + 30000 // 30 seconds
+        const realmExpiresAt = Date.now() + 60000 // 1 minute
+
+        // Role Assignment
+        const shuffled = [...players].sort(() => 0.5 - Math.random())
+        const roles: PlayerRole[] = []
+
+        // Logic: 2 players = 1 Fisher, 1 Cooker. 
+        // 3+ players: 2 Fishers, rest Cookers.
+        if (players.length === 2) {
+            roles.push('Fisher', 'Cooker')
+        } else {
+            roles.push('Fisher', 'Fisher')
+            while (roles.length < players.length) roles.push('Cooker')
+        }
+
+        // Apply roles to PlayerManager
+        shuffled.forEach((p, i) => {
+            const player = this.gameRoom.playerManager.players.get(p.id)
+            if (player) {
+                player.role = roles[i]
+                player.heldItem = null // Reset item
+                player.isFrozen = false
+            }
+        })
 
         this.activeRealms.set(newRealmId, realmExpiresAt)
         this.saveActiveRealms()
+
+        // PUSH configuration to the Key Durable Object Instance
+        // This ensures the new instance knows its expiry and roles immediately
+        const realmStubId = this.gameRoom.env.GAMEROOM_NAMESPACE.idFromName(newRealmId)
+        const realmStub = this.gameRoom.env.GAMEROOM_NAMESPACE.get(realmStubId)
+
+        const roleData = shuffled.map((p, i) => ({ playerId: p.id, role: roles[i] }))
+        // Fire and forget - or await? Ideally await to ensure it's ready before clients connect
+        // But clients take time to switch anyway.
+        realmStub.fetch('http://internal/internal/init-realm', {
+            method: 'POST',
+            body: JSON.stringify({
+                expiresAt: realmExpiresAt,
+                roles: roleData
+            })
+        }).catch(e => console.error('Failed to init realm instance:', e))
+
 
         for (const wp of players) {
             this.playerRealmMap.set(wp.id, { realmId: newRealmId, expiresAt: realmExpiresAt })

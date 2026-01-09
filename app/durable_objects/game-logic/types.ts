@@ -1,3 +1,5 @@
+export type PlayerRole = 'Fisher' | 'Cooker' | 'None'
+
 export interface Player {
     id: string
     firstName: string // Google name/First name
@@ -10,6 +12,10 @@ export interface Player {
     isDead: boolean
     deathTime: number
     weapon: string | null
+    // Realm Role State
+    role?: PlayerRole
+    heldItem?: string | null // 'fish' | null
+    isFrozen?: boolean // For "Pass Fish" animation lock
     // Action State
     isActing?: boolean
     actionType?: string | null

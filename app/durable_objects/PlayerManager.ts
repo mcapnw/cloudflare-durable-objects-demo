@@ -79,7 +79,10 @@ export class PlayerManager {
             faceIndex: faceIndex,
             isDead: false,
             deathTime: 0,
-            weapon: dbFound ? dbWeapon : (savedLoc?.weapon || null)
+            weapon: dbFound ? dbWeapon : (savedLoc?.weapon || null),
+            role: this.gameRoom.realmManager.assignedRoles.get(id) || 'None',
+            heldItem: null,
+            isFrozen: false
         }
 
         // Check if player is already in memory (e.g. fast reconnect/refresh)

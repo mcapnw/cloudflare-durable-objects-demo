@@ -197,7 +197,11 @@ export class MessageHandler {
                         realmId: null
                     }))
                 }
+            } else if (data.type === 'start_fishing') {
+                this.gameRoom.realmGameManager.startFishing(playerId)
+            } else if (data.type === 'pass_fish') {
+                this.gameRoom.realmGameManager.passFish(playerId)
             }
-        } catch (err) { console.error('Error parsing message', err) }
+        } catch (err: unknown) { console.error('Error parsing message', err) }
     }
 }

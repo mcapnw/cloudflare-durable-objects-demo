@@ -36,9 +36,12 @@ export interface PlayerData {
     deathZ?: number
     weapon: string | null
     weaponMesh?: any
+    // Realm Role State
+    role?: 'Fisher' | 'Cooker' | 'None'
+    heldItem?: string | null
     // Action state
     isActing?: boolean
-    actionType?: 'planting' | 'watering' | 'harvesting' | null
+    actionType?: 'planting' | 'watering' | 'harvesting' | 'fishing' | null
     actionPlotId?: number | null
     actingPlotId?: number | null
     actingStartTime?: number
