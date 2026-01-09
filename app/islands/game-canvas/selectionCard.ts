@@ -9,28 +9,30 @@ import * as Utils from './utils'
 import * as MeshFactories from './meshFactories'
 
 export interface SelectionCardConfig {
-    initialUsername: string
-    initialGender: 'male' | 'female'
-    initialFaceIndex: number
-    onGenderChange: (gender: 'male' | 'female') => void
-    onFaceChange: (index: number) => void
-    onEnterWorld: (username: string, gender: 'male' | 'female', faceIndex: number) => Promise<void>
+  initialUsername: string
+  initialGender: 'male' | 'female'
+  initialFaceIndex: number
+  isAdmin: boolean
+  onGenderChange: (gender: 'male' | 'female') => void
+  onFaceChange: (index: number) => void
+  onEnterWorld: (username: string, gender: 'male' | 'female', faceIndex: number) => Promise<void>
+  onAdminClick?: () => void
 }
 
 export interface SelectionCardElements {
-    card: HTMLDivElement
-    usernameInput: HTMLInputElement
+  card: HTMLDivElement
+  usernameInput: HTMLInputElement
 }
 
 /**
  * Injects the required CSS styles for the selection card
  */
 export function injectStyles(): void {
-    if (document.getElementById('selection-card-styles')) return
+  if (document.getElementById('selection-card-styles')) return
 
-    const style = document.createElement('style')
-    style.id = 'selection-card-styles'
-    style.innerHTML = `
+  const style = document.createElement('style')
+  style.id = 'selection-card-styles'
+  style.innerHTML = `
       #selection-card {
         position: fixed;
         background: rgba(0, 0, 0, 0.65);
@@ -126,89 +128,110 @@ export function injectStyles(): void {
       }
       .card-play-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(76, 175, 80, 0.5); }
       .card-play-btn:active { transform: translateY(1px); }
+      .card-bottom-row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 16px;
+        margin-top: 4px;
+      }
+      .logout-link, .admin-link {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 11px;
+        text-decoration: underline;
+        cursor: pointer;
+        background: none;
+        border: none;
+        padding: 0;
+        font-family: inherit;
+        letter-spacing: 0.5px;
+        transition: color 0.2s;
+      }
+      .logout-link:hover { color: #EF5350; }
+      .admin-link:hover { color: #FFD54F; }
     `
-    document.head.appendChild(style)
+  document.head.appendChild(style)
 }
 
 /**
  * Creates the selection card UI and attaches it to the document body
  */
 export function createSelectionCard(config: SelectionCardConfig): SelectionCardElements {
-    injectStyles()
+  injectStyles()
 
-    let currentGender = config.initialGender
-    let currentFaceIndex = config.initialFaceIndex
+  let currentGender = config.initialGender
+  let currentFaceIndex = config.initialFaceIndex
 
-    // Create main card container
-    const selectionCard = document.createElement('div')
-    selectionCard.id = 'selection-card'
+  // Create main card container
+  const selectionCard = document.createElement('div')
+  selectionCard.id = 'selection-card'
 
-    // Name Section
-    const nameSection = document.createElement('div')
-    nameSection.className = 'card-section'
-    nameSection.innerHTML = '<span class="card-label">Identity</span>'
-    selectionCard.appendChild(nameSection)
+  // Name Section
+  const nameSection = document.createElement('div')
+  nameSection.className = 'card-section'
+  nameSection.innerHTML = '<span class="card-label">Identity</span>'
+  selectionCard.appendChild(nameSection)
 
-    const usernameInput = document.createElement('input')
-    usernameInput.type = 'text'
-    usernameInput.placeholder = 'Enter Username'
-    usernameInput.value = config.initialUsername || ''
-    usernameInput.maxLength = 16
-    usernameInput.className = 'card-input'
-    nameSection.appendChild(usernameInput)
-    usernameInput.addEventListener('input', () => {
-        usernameInput.value = usernameInput.value.replace(/[^a-zA-Z0-9 ]/g, '')
-    })
+  const usernameInput = document.createElement('input')
+  usernameInput.type = 'text'
+  usernameInput.placeholder = 'Enter Username'
+  usernameInput.value = config.initialUsername || ''
+  usernameInput.maxLength = 16
+  usernameInput.className = 'card-input'
+  nameSection.appendChild(usernameInput)
+  usernameInput.addEventListener('input', () => {
+    usernameInput.value = usernameInput.value.replace(/[^a-zA-Z0-9 ]/g, '')
+  })
 
-    // Gender Section
-    const genderSection = document.createElement('div')
-    genderSection.className = 'card-section'
-    genderSection.innerHTML = '<span class="card-label">Physique</span>'
-    selectionCard.appendChild(genderSection)
+  // Gender Section
+  const genderSection = document.createElement('div')
+  genderSection.className = 'card-section'
+  genderSection.innerHTML = '<span class="card-label">Physique</span>'
+  selectionCard.appendChild(genderSection)
 
-    const charGenderBtn = document.createElement('button')
-    charGenderBtn.className = 'card-btn'
-    const updateGenderBtn = () => {
-        charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${currentGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${currentGender.toUpperCase()}</span>`
-    }
+  const charGenderBtn = document.createElement('button')
+  charGenderBtn.className = 'card-btn'
+  const updateGenderBtn = () => {
+    charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${currentGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${currentGender.toUpperCase()}</span>`
+  }
+  updateGenderBtn()
+  genderSection.appendChild(charGenderBtn)
+  charGenderBtn.addEventListener('click', () => {
+    currentGender = currentGender === 'male' ? 'female' : 'male'
     updateGenderBtn()
-    genderSection.appendChild(charGenderBtn)
-    charGenderBtn.addEventListener('click', () => {
-        currentGender = currentGender === 'male' ? 'female' : 'male'
-        updateGenderBtn()
-        config.onGenderChange(currentGender)
-    })
+    config.onGenderChange(currentGender)
+  })
 
-    // Face Section
-    const faceSection = document.createElement('div')
-    faceSection.className = 'card-section'
-    faceSection.innerHTML = '<span class="card-label">Appearance</span>'
-    selectionCard.appendChild(faceSection)
+  // Face Section
+  const faceSection = document.createElement('div')
+  faceSection.className = 'card-section'
+  faceSection.innerHTML = '<span class="card-label">Appearance</span>'
+  selectionCard.appendChild(faceSection)
 
-    const faceBtn = document.createElement('button')
-    faceBtn.className = 'card-btn'
-    const updateFaceBtn = () => {
-        faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
-    }
+  const faceBtn = document.createElement('button')
+  faceBtn.className = 'card-btn'
+  const updateFaceBtn = () => {
+    faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
+  }
+  updateFaceBtn()
+  faceSection.appendChild(faceBtn)
+  faceBtn.addEventListener('click', () => {
+    currentFaceIndex = (currentFaceIndex + 1) % MeshFactories.charFaces.length
     updateFaceBtn()
-    faceSection.appendChild(faceBtn)
-    faceBtn.addEventListener('click', () => {
-        currentFaceIndex = (currentFaceIndex + 1) % MeshFactories.charFaces.length
-        updateFaceBtn()
-        config.onFaceChange(currentFaceIndex)
-    })
+    config.onFaceChange(currentFaceIndex)
+  })
 
-    // Play Button
-    const playBtn = document.createElement('button')
-    playBtn.innerText = 'ENTER WORLD'
-    playBtn.className = 'card-play-btn'
-    selectionCard.appendChild(playBtn)
-    playBtn.addEventListener('click', async () => {
-        const username = usernameInput.value.trim()
-        await config.onEnterWorld(username, currentGender, currentFaceIndex)
-    })
+  // Play Button
+  const playBtn = document.createElement('button')
+  playBtn.innerText = 'ENTER WORLD'
+  playBtn.className = 'card-play-btn'
+  selectionCard.appendChild(playBtn)
+  playBtn.addEventListener('click', async () => {
+    const username = usernameInput.value.trim()
+    await config.onEnterWorld(username, currentGender, currentFaceIndex)
+  })
 
-    document.body.appendChild(selectionCard)
+  document.body.appendChild(selectionCard)
 
-    return { card: selectionCard, usernameInput }
+  return { card: selectionCard, usernameInput }
 }
+

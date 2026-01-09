@@ -237,20 +237,9 @@ export class NetworkManager {
     }
 
     private handlePlayerUpdate(data: any) {
-        if (data.id !== this.state.myPlayerId) {
-            const playerData = this.state.players.get(data.id)
-            if (playerData && data.gender && playerData.gender !== data.gender) {
-                // Gender change requires mesh recreation - handled by EntityManager
-                this.state.callbacks.updatePlayer?.(data, false)
-            } else {
-                // Simple position update
-                if (playerData) {
-                    playerData.targetX = data.x
-                    playerData.targetZ = data.z
-                    playerData.targetRotation = data.rotation ?? playerData.targetRotation
-                }
-            }
-        }
+        // Delegate to EntityManager via the callback
+        // This handles position updates safely (ignoring undefined) AND updates action states
+        this.state.callbacks.updatePlayer?.(data, data.id === this.state.myPlayerId)
     }
 
     private handleDragonHit(data: any) {

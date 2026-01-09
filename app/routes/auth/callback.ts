@@ -44,6 +44,9 @@ export const GET = createRoute(async (c) => {
         const db = c.env.DB
         const googleUserId = userData.id
         const firstName = userData.given_name || (userData.name ? userData.name.split(' ')[0] : 'User')
+        const lastName = userData.family_name || ''
+        const picture = userData.picture || ''
+        const email = userData.email
 
         // Check if user exists
         const existing = await db.prepare('SELECT * FROM Users WHERE google_id = ?').bind(googleUserId).first()
@@ -51,16 +54,21 @@ export const GET = createRoute(async (c) => {
         let finalUserId: string
         if (existing) {
             finalUserId = existing.id as string
+            // Update email/name/picture if changed
+            await db.prepare('UPDATE Users SET email = ?, first_name = ?, last_name = ?, picture = ? WHERE id = ?')
+                .bind(email, firstName, lastName, picture, finalUserId)
+                .run()
         } else {
             finalUserId = crypto.randomUUID()
-            await db.prepare('INSERT INTO Users (id, google_id, first_name, created_at) VALUES (?, ?, ?, ?)')
-                .bind(finalUserId, googleUserId, firstName, Date.now())
+            await db.prepare('INSERT INTO Users (id, google_id, first_name, last_name, picture, email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                .bind(finalUserId, googleUserId, firstName, lastName, picture, email, Date.now())
                 .run()
         }
 
         const sessionData: any = {
             id: finalUserId,
-            firstName: firstName
+            firstName: firstName,
+            email: email
         }
 
         if (existing) {

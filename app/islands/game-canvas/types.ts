@@ -2,11 +2,13 @@ export interface GameCanvasProps {
     userId?: string
     firstName?: string
     username?: string
+    email?: string
     gender?: 'male' | 'female'
     faceIndex?: number
     initialCoins?: number
     initialInventory?: string[]
     tutorialComplete?: boolean
+    serverVersion?: string
 }
 
 export interface PlayerData {

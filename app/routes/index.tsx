@@ -3,9 +3,14 @@ import GameCanvas from '../islands/GameCanvas'
 
 export default createRoute(async (c) => {
     const sessionUser = c.get('user')
+    const db = c.env.DB
+
+    // Get server version
+    const versionRow = await db.prepare("SELECT value FROM GameConfig WHERE key = 'version'").first<{ value: string }>()
+    const serverVersion = versionRow?.value || '1.0.0'
+
     let dbUser = null
     if (sessionUser?.id) {
-        const db = c.env.DB
         dbUser = await db.prepare('SELECT * FROM Users WHERE id = ?').bind(sessionUser.id).first()
     }
 
@@ -92,6 +97,7 @@ export default createRoute(async (c) => {
             <GameCanvas
                 userId={sessionUser?.id}
                 firstName={sessionUser?.firstName}
+                email={sessionUser?.email}
                 username={(dbUser as any)?.username || sessionUser?.username}
                 gender={((dbUser as any)?.gender || sessionUser?.gender) as 'male' | 'female'}
                 faceIndex={(dbUser as any)?.face_index ?? sessionUser?.faceIndex}
@@ -99,6 +105,7 @@ export default createRoute(async (c) => {
                 initialInventory={inventory}
                 tutorialComplete={!!(dbUser as any)?.tutorial_complete}
                 activeRealmId={activeRealmId}
+                serverVersion={serverVersion}
             />
         </div>,
         { title: 'Antigravity - Game' }

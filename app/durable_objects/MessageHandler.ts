@@ -97,7 +97,7 @@ export class MessageHandler {
                     speed: speed
                 })
             } else if (data.type === 'get_scores') {
-                const scores = await this.gameRoom.env.DB.prepare('SELECT username, first_name, dragon_kills, deaths FROM Users ORDER BY dragon_kills DESC LIMIT 5').all()
+                const scores = await this.gameRoom.env.DB.prepare('SELECT username, first_name, dragon_kills, deaths FROM Users ORDER BY dragon_kills DESC LIMIT 10').all()
                 ws.send(JSON.stringify({ type: 'scores', scores: scores.results }))
             } else if (data.type === 'collect_pickup') {
                 const pickup = this.gameRoom.pickups.get(data.pickupId)

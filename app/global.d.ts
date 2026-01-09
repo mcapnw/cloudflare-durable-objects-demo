@@ -10,6 +10,7 @@ declare module 'hono' {
             user: {
                 id: string
                 firstName: string
+                email?: string
                 username?: string
                 gender?: string
                 faceIndex?: number

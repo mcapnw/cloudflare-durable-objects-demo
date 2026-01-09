@@ -9,7 +9,7 @@ import * as RealmManager from './realmManager'
 import * as SelectionCard from './selectionCard'
 import { FarmingUI } from './farmingUI'
 
-export default function GameCanvas({ userId, firstName, username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete, activeRealmId }: Types.GameCanvasProps & { activeRealmId?: string | null }) {
+export default function GameCanvas({ userId, firstName, username, email, gender, faceIndex, initialCoins, initialInventory, tutorialComplete, activeRealmId, serverVersion }: Types.GameCanvasProps & { activeRealmId?: string | null }) {
     const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -19,7 +19,7 @@ export default function GameCanvas({ userId, firstName, username, gender, faceIn
             import('three/examples/jsm/loaders/GLTFLoader.js'),
             import('three/examples/jsm/utils/SkeletonUtils.js')
         ]).then(([THREE, { GLTFLoader }, SkeletonUtils]) => {
-            initGame(THREE, { GLTFLoader, SkeletonUtils }, containerRef.current!, userId || 'anonymous', firstName || 'Player', username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete, activeRealmId)
+            initGame(THREE, { GLTFLoader, SkeletonUtils }, containerRef.current!, userId || 'anonymous', firstName || 'Player', email, username, gender, faceIndex, initialCoins, initialInventory, tutorialComplete, activeRealmId, serverVersion)
         })
     }, [])
 
@@ -28,7 +28,10 @@ export default function GameCanvas({ userId, firstName, username, gender, faceIn
     )
 }
 
-function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, container: HTMLElement, myUserId: string, myFirstName: string, initialUsername?: string, initialGender?: 'male' | 'female', initialFaceIndex?: number, initialCoins: number = 0, initialInventory: string[] = [], tutorialComplete: boolean = false, initialActiveRealmId?: string | null) {
+function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, container: HTMLElement, myUserId: string, myFirstName: string, myEmail?: string, initialUsername?: string, initialGender?: 'male' | 'female', initialFaceIndex?: number, initialCoins: number = 0, initialInventory: string[] = [], tutorialComplete: boolean = false, initialActiveRealmId?: string | null, serverVersion?: string) {
+    const ADMIN_EMAIL = 'mcapnw@gmail.com'
+    const isAdmin = myEmail === ADMIN_EMAIL
+
     // Initialize Factories
     MeshFactories.initFactories(THREE, LOADERS.SkeletonUtils);
 
@@ -347,6 +350,11 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 })
                 sheeps.clear()
             }
+            // Hide dragon when entering realm
+            if (dragon) {
+                if (dragon.mesh) dragon.mesh.visible = false
+                if (dragon.labelGroup) dragon.labelGroup.visible = false
+            }
             if (!realmState) {
                 realmState = RealmManager.setupRealm(scene, THREE)
                 isInRealm = true
@@ -355,6 +363,11 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             if (realmState) {
                 RealmManager.cleanupRealm(scene, THREE)
                 realmState = null
+            }
+            // Restore dragon visibility when returning to lobby
+            if (dragon && !dragon.isDead) {
+                if (dragon.mesh) dragon.mesh.visible = true
+                if (dragon.labelGroup) dragon.labelGroup.visible = true
             }
             if (!lobbyState) {
                 lobbyState = LobbyManager.setupLobby(scene, THREE, textureLoader, MeshFactories, UIGenerators)
@@ -1148,9 +1161,10 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     function updatePlayerTarget(data: any) {
         const playerData = players.get(data.id)
         if (playerData) {
-            playerData.targetX = data.x
-            playerData.targetZ = data.z
-            playerData.targetRotation = data.rotation ?? playerData.targetRotation
+            // Only update position if values are defined
+            if (data.x !== undefined) playerData.targetX = data.x
+            if (data.z !== undefined) playerData.targetZ = data.z
+            if (data.rotation !== undefined) playerData.targetRotation = data.rotation
             if (data.isActing !== undefined) playerData.isActing = data.isActing
             if (data.actionType !== undefined) playerData.actionType = data.actionType
             if (data.actionPlotId !== undefined) playerData.actingPlotId = data.actionPlotId
@@ -1317,11 +1331,202 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         }
     }
 
+    // Admin Modal (if user is admin)
+    let adminModal: HTMLDivElement | null = null
+    let adminModalContent: HTMLDivElement | null = null
+    if (isAdmin) {
+        adminModal = document.createElement('div')
+        adminModal.id = 'admin-modal'
+        adminModal.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.9); z-index: 500; display: none;
+            overflow-y: auto;
+        `
+        adminModalContent = document.createElement('div')
+        adminModalContent.style.cssText = `
+            max-width: 600px; margin: 0 auto; padding: 20px;
+        `
+        adminModal.appendChild(adminModalContent)
+        document.body.appendChild(adminModal)
+    }
+
+    async function openAdminPanel() {
+        if (!adminModal || !adminModalContent) return
+        adminModal.style.display = 'block'
+        adminModalContent.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">Loading...</div>'
+
+        try {
+            const res = await fetch('/api/admin/users')
+            if (!res.ok) {
+                adminModalContent.innerHTML = '<div style="color: #EF5350; text-align: center; padding: 40px;">Access denied</div>'
+                return
+            }
+            const data = await res.json() as { users: any[] }
+            renderAdminUserList(data.users)
+        } catch (e) {
+            adminModalContent.innerHTML = '<div style="color: #EF5350; text-align: center; padding: 40px;">Error loading users</div>'
+        }
+    }
+
+    function renderAdminUserList(users: any[]) {
+        if (!adminModalContent) return
+        adminModalContent.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid #333;">
+                <h2 style="margin: 0; color: white; font-size: 18px;">Player Administration</h2>
+                <button id="admin-close-btn" style="background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer;">×</button>
+            </div>
+            <div style="background: #333; border-radius: 12px; padding: 16px; margin: 16px 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+                    <div>
+                        <div style="font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 4px;">Game Version</div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input id="admin-version-input" type="text" value="" style="width: 100px; padding: 8px 12px; background: #252525; border: 1px solid #444; border-radius: 6px; color: white; font-family: monospace;" />
+                            <button id="admin-version-save" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Update</button>
+                        </div>
+                    </div>
+                    <div style="font-size: 11px; color: #666;">Client: ${Constants.CLIENT_VERSION}</div>
+                </div>
+                <div id="admin-version-msg" style="margin-top: 8px; font-size: 12px; color: #81c784;"></div>
+            </div>
+            <div id="admin-user-list" style="display: flex; flex-direction: column; gap: 8px; padding: 0 0 16px 0;"></div>
+        `
+        // Load current version
+        fetch('/api/version').then(r => r.json()).then((data: any) => {
+            const input = document.getElementById('admin-version-input') as HTMLInputElement
+            if (input) input.value = data.version || ''
+        })
+        // Save version handler
+        document.getElementById('admin-version-save')?.addEventListener('click', async () => {
+            const input = document.getElementById('admin-version-input') as HTMLInputElement
+            const msgEl = document.getElementById('admin-version-msg')!
+            msgEl.innerText = 'Saving...'
+            msgEl.style.color = '#aaa'
+            try {
+                const res = await fetch('/api/admin/version', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ version: input.value })
+                })
+                if (res.ok) {
+                    msgEl.innerText = 'Version updated! Users will be prompted to refresh.'
+                    msgEl.style.color = '#81c784'
+                } else {
+                    msgEl.innerText = 'Failed to update'
+                    msgEl.style.color = '#ef9a9a'
+                }
+            } catch (e) {
+                msgEl.innerText = 'Error'
+                msgEl.style.color = '#ef9a9a'
+            }
+        })
+        const listEl = document.getElementById('admin-user-list')!
+        users.forEach(u => {
+            const row = document.createElement('div')
+            row.style.cssText = 'background: #333; border-radius: 12px; padding: 12px; display: flex; align-items: center; gap: 16px; cursor: pointer;'
+            row.innerHTML = `
+                <img src="${u.picture || 'https://via.placeholder.com/48'}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; background: #444;" />
+                <div style="flex: 1; overflow: hidden;">
+                    <div style="font-weight: 600; font-size: 16px; color: white; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.first_name} ${u.last_name || ''}</div>
+                    <div style="font-size: 13px; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.email || ''}</div>
+                </div>
+                <div style="color: #555; font-size: 20px;">›</div>
+            `
+            row.addEventListener('click', () => loadAdminUserDetails(u.id))
+            listEl.appendChild(row)
+        })
+        document.getElementById('admin-close-btn')?.addEventListener('click', () => { if (adminModal) adminModal.style.display = 'none' })
+    }
+
+    async function loadAdminUserDetails(userId: string) {
+        if (!adminModalContent) return
+        adminModalContent.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">Loading...</div>'
+        try {
+            const res = await fetch(`/api/admin/user/${userId}`)
+            if (!res.ok) { adminModalContent.innerHTML = '<div style="color: #EF5350;">Error</div>'; return }
+            const data = await res.json() as { user: any }
+            renderAdminUserEdit(data.user)
+        } catch (e) {
+            adminModalContent.innerHTML = '<div style="color: #EF5350;">Error loading user</div>'
+        }
+    }
+
+    function renderAdminUserEdit(user: any) {
+        if (!adminModalContent) return
+        adminModalContent.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; padding: 16px 0; border-bottom: 1px solid #333;">
+                <button id="admin-back-btn" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">←</button>
+                <h2 style="margin: 0; color: white; font-size: 18px;">Edit User</h2>
+            </div>
+            <div style="background: #333; border-radius: 12px; padding: 20px; text-align: center; margin: 16px 0;">
+                <div style="font-size: 13px; color: #888; margin-bottom: 4px;">USER ID: ${user.id}</div>
+                <div style="font-size: 20px; font-weight: bold; color: white;">${user.first_name}</div>
+                <div style="color: #aaa;">${user.email || ''}</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #ccc;">Username</label>
+                    <input id="admin-username" type="text" value="${user.username || ''}" style="width: 100%; padding: 12px; background: #252525; border: 1px solid #444; border-radius: 8px; color: white; box-sizing: border-box;" />
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #ccc;">Coins</label>
+                    <input id="admin-coins" type="number" value="${user.coins || 0}" style="width: 100%; padding: 12px; background: #252525; border: 1px solid #444; border-radius: 8px; color: white; box-sizing: border-box;" />
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #ccc;">Weapon</label>
+                    <select id="admin-weapon" style="width: 100%; padding: 12px; background: #252525; border: 1px solid #444; border-radius: 8px; color: white; box-sizing: border-box;">
+                        <option value="" ${!user.weapon ? 'selected' : ''}>NULL</option>
+                        <option value="staff_beginner" ${user.weapon === 'staff_beginner' ? 'selected' : ''}>staff_beginner</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #ccc;">Tutorial Complete</label>
+                    <input id="admin-tutorial" type="number" min="0" max="1" value="${user.tutorial_complete || 0}" style="width: 100%; padding: 12px; background: #252525; border: 1px solid #444; border-radius: 8px; color: white; box-sizing: border-box;" />
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #ccc;">Inventory (JSON)</label>
+                    <textarea id="admin-inventory" style="width: 100%; height: 100px; padding: 12px; background: #252525; border: 1px solid #444; border-radius: 8px; color: white; font-family: monospace; box-sizing: border-box;">${user.inventory || '[]'}</textarea>
+                </div>
+            </div>
+            <button id="admin-save-btn" style="width: 100%; padding: 16px; background: #4CAF50; color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 16px; font-weight: bold; margin-top: 20px;">Save Changes</button>
+            <div id="admin-message" style="text-align: center; margin-top: 12px; color: #81c784;"></div>
+        `
+        document.getElementById('admin-back-btn')?.addEventListener('click', openAdminPanel)
+        document.getElementById('admin-save-btn')?.addEventListener('click', async () => {
+            const msgEl = document.getElementById('admin-message')!
+            msgEl.innerText = 'Saving...'
+            msgEl.style.color = '#aaa'
+            try {
+                const res = await fetch(`/api/admin/user/${user.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: (document.getElementById('admin-username') as HTMLInputElement).value || null,
+                        coins: parseInt((document.getElementById('admin-coins') as HTMLInputElement).value),
+                        weapon: (document.getElementById('admin-weapon') as HTMLSelectElement).value || null,
+                        tutorial_complete: parseInt((document.getElementById('admin-tutorial') as HTMLInputElement).value),
+                        inventory: (document.getElementById('admin-inventory') as HTMLTextAreaElement).value
+                    })
+                })
+                if (res.ok) {
+                    msgEl.innerText = 'Saved successfully!'
+                    msgEl.style.color = '#81c784'
+                } else {
+                    msgEl.innerText = 'Failed to save'
+                    msgEl.style.color = '#ef9a9a'
+                }
+            } catch (e) {
+                msgEl.innerText = 'Error saving'
+                msgEl.style.color = '#ef9a9a'
+            }
+        })
+    }
+
     // Selection Card (Character Customization)
     const selectionCardElements = SelectionCard.createSelectionCard({
         initialUsername: myUsername || myFirstName || '',
         initialGender: charGender,
         initialFaceIndex: currentFaceIndex,
+        isAdmin: isAdmin,
         onGenderChange: (g) => {
             charGender = g
             myGender = g
@@ -1348,6 +1553,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             currentMode = 'game'
             updateUIVisibility()
             connectWebSocket(true)
+        },
+        onAdminClick: () => {
+            openAdminPanel()
         }
     })
     const selectionCard = selectionCardElements.card
@@ -1531,6 +1739,64 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         switchToMode('game')
     })
 
+    // Character screen top bar with Admin and Logout buttons
+    const characterTopBar = document.createElement('div')
+    characterTopBar.id = 'character-top-bar'
+    characterTopBar.style.cssText = `
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        display: none;
+        gap: 16px;
+        z-index: 120;
+        font-family: system-ui, sans-serif;
+    `
+
+    if (isAdmin) {
+        const characterAdminBtn = document.createElement('button')
+        characterAdminBtn.innerText = 'Admin'
+        characterAdminBtn.style.cssText = `
+            color: rgba(255, 255, 255, 0.6);
+            background: transparent;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+            font-family: system-ui, sans-serif;
+            text-decoration: underline;
+            letter-spacing: 0.5px;
+            transition: color 0.2s;
+        `
+        characterAdminBtn.addEventListener('mouseenter', () => characterAdminBtn.style.color = '#FFD54F')
+        characterAdminBtn.addEventListener('mouseleave', () => characterAdminBtn.style.color = 'rgba(255, 255, 255, 0.6)')
+        characterAdminBtn.addEventListener('click', () => openAdminPanel())
+        characterTopBar.appendChild(characterAdminBtn)
+    }
+
+    const characterLogoutBtn = document.createElement('button')
+    characterLogoutBtn.innerText = 'Logout'
+    characterLogoutBtn.style.cssText = `
+        color: rgba(255, 255, 255, 0.6);
+        background: transparent;
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 14px;
+        font-family: system-ui, sans-serif;
+        text-decoration: underline;
+        letter-spacing: 0.5px;
+        transition: color 0.2s;
+    `
+    characterLogoutBtn.addEventListener('mouseenter', () => characterLogoutBtn.style.color = '#EF5350')
+    characterLogoutBtn.addEventListener('mouseleave', () => characterLogoutBtn.style.color = 'rgba(255, 255, 255, 0.6)')
+    characterLogoutBtn.addEventListener('click', () => window.location.href = '/auth/logout')
+    characterTopBar.appendChild(characterLogoutBtn)
+    document.body.appendChild(characterTopBar)
+
     function updateUIVisibility() {
         if (isVersionMismatch) return
         const invBtn = document.getElementById('inventory-btn')
@@ -1549,9 +1815,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             (rModal && rModal.style.display === 'block')
         )
 
+        characterTopBar.style.display = 'none' // Default hidden
+
         if (currentMode === 'character') {
             const selectionCard = document.getElementById('selection-card')
             if (selectionCard) selectionCard.style.display = 'flex'
+
+            characterTopBar.style.display = 'flex' // Show only on character screen
 
             exitCameraBtn.style.display = 'none'
             damageListEl.style.display = 'none'
