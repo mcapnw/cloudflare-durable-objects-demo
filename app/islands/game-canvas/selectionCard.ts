@@ -2,7 +2,7 @@
  * Selection Card UI - Character customization screen
  * 
  * Creates the character selection card with username input,
- * gender selection, face style selection, and enter world button.
+ * gender selection, face style selection, and play button.
  */
 
 import * as Utils from './utils'
@@ -35,119 +35,98 @@ export function injectStyles(): void {
   style.innerHTML = `
       #selection-card {
         position: fixed;
-        background: rgba(0, 0, 0, 0.65);
+        background: rgba(0, 0, 0, 0.7);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 20px;
-        padding: 24px;
+        border-radius: 16px;
+        padding: 16px;
         display: none;
         flex-direction: column;
-        gap: 16px;
+        gap: 12px;
         z-index: 100;
         box-shadow: 0 10px 40px rgba(0,0,0,0.5);
       }
       @media (min-width: 769px) {
         #selection-card {
-          right: 60px;
+          right: 40px;
           top: 50%;
           transform: translateY(-50%);
-          width: 320px;
+          width: 280px;
         }
       }
       @media (max-width: 768px) {
         #selection-card {
-          bottom: 30px;
+          bottom: 20px;
           left: 50%;
           transform: translateX(-50%);
-          width: 85%;
-          max-width: 380px;
+          width: 90%;
+          padding: 12px;
+          gap: 10px;
         }
       }
-      .card-section { display: flex; flex-direction: column; gap: 8px; }
-      .card-label {
-        color: rgba(255,255,255,0.5);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        font-weight: 700;
-        margin-left: 4px;
+      .card-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
-      .card-input {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 12px;
+      .card-row-label {
+        color: rgba(255,255,255,0.6);
+        font-size: 13px;
+        font-weight: 500;
+        min-width: 70px;
+      }
+      .card-input-compact {
+        flex: 1;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 8px;
         color: white;
-        padding: 14px 16px;
-        font-size: 16px;
-        width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
         box-sizing: border-box;
         font-family: inherit;
         outline: none;
         transition: all 0.2s;
       }
-      .card-input:focus {
+      .card-input-compact:focus {
         border-color: #FFD54F;
-        background: rgba(255,255,255,0.1);
+        background: rgba(255,255,255,0.12);
       }
-      .card-btn {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 12px;
+      .card-inline-btn {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 8px;
         color: white;
-        padding: 14px 16px;
-        font-size: 16px;
+        padding: 10px 14px;
+        font-size: 13px;
         cursor: pointer;
         transition: all 0.2s;
         font-weight: 500;
-        width: 100%;
-        text-align: left;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
         font-family: inherit;
+        white-space: nowrap;
       }
-      .card-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+      .card-inline-btn:hover { background: rgba(255,255,255,0.15); }
       .card-play-btn {
         background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
         color: white;
         border: none;
-        border-radius: 14px;
-        padding: 18px;
-        font-size: 18px;
-        font-weight: 800;
+        border-radius: 10px;
+        padding: 14px;
+        font-size: 16px;
+        font-weight: 700;
         cursor: pointer;
-        box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
         transition: all 0.2s;
         width: 100%;
         text-align: center;
-        margin-top: 8px;
+        margin-top: 4px;
         font-family: inherit;
         text-transform: uppercase;
         letter-spacing: 1px;
       }
-      .card-play-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(76, 175, 80, 0.5); }
+      .card-play-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(76, 175, 80, 0.5); }
       .card-play-btn:active { transform: translateY(1px); }
-      .card-bottom-row {
-        display: flex;
-        justify-content: flex-end;
-        gap: 16px;
-        margin-top: 4px;
-      }
-      .logout-link, .admin-link {
-        color: rgba(255, 255, 255, 0.4);
-        font-size: 11px;
-        text-decoration: underline;
-        cursor: pointer;
-        background: none;
-        border: none;
-        padding: 0;
-        font-family: inherit;
-        letter-spacing: 0.5px;
-        transition: color 0.2s;
-      }
-      .logout-link:hover { color: #EF5350; }
-      .admin-link:hover { color: #FFD54F; }
     `
   document.head.appendChild(style)
 }
@@ -165,64 +144,67 @@ export function createSelectionCard(config: SelectionCardConfig): SelectionCardE
   const selectionCard = document.createElement('div')
   selectionCard.id = 'selection-card'
 
-  // Name Section
-  const nameSection = document.createElement('div')
-  nameSection.className = 'card-section'
-  nameSection.innerHTML = '<span class="card-label">Identity</span>'
-  selectionCard.appendChild(nameSection)
+  // Username Row
+  const usernameRow = document.createElement('div')
+  usernameRow.className = 'card-row'
+  const usernameLabel = document.createElement('span')
+  usernameLabel.className = 'card-row-label'
+  usernameLabel.innerText = 'Username:'
+  usernameRow.appendChild(usernameLabel)
 
   const usernameInput = document.createElement('input')
   usernameInput.type = 'text'
-  usernameInput.placeholder = 'Enter Username'
+  usernameInput.placeholder = 'Enter name'
   usernameInput.value = config.initialUsername || ''
   usernameInput.maxLength = 16
-  usernameInput.className = 'card-input'
-  nameSection.appendChild(usernameInput)
+  usernameInput.className = 'card-input-compact'
+  usernameRow.appendChild(usernameInput)
   usernameInput.addEventListener('input', () => {
     usernameInput.value = usernameInput.value.replace(/[^a-zA-Z0-9 ]/g, '')
   })
+  selectionCard.appendChild(usernameRow)
 
-  // Gender Section
-  const genderSection = document.createElement('div')
-  genderSection.className = 'card-section'
-  genderSection.innerHTML = '<span class="card-label">Physique</span>'
-  selectionCard.appendChild(genderSection)
+  // Gender & Face Row
+  const optionsRow = document.createElement('div')
+  optionsRow.className = 'card-row'
+  optionsRow.style.justifyContent = 'space-between'
 
-  const charGenderBtn = document.createElement('button')
-  charGenderBtn.className = 'card-btn'
+  // Gender Button
+  const genderBtn = document.createElement('button')
+  genderBtn.className = 'card-inline-btn'
+  genderBtn.style.flex = '1'
   const updateGenderBtn = () => {
-    charGenderBtn.innerHTML = `<span>Gender</span> <span style="opacity:0.7; color:${currentGender === 'male' ? '#93C5FD' : '#F9A8D4'}">${currentGender.toUpperCase()}</span>`
+    const color = currentGender === 'male' ? '#93C5FD' : '#F9A8D4'
+    genderBtn.innerHTML = `Gender: <span style="color:${color}">${currentGender.charAt(0).toUpperCase() + currentGender.slice(1)}</span>`
   }
   updateGenderBtn()
-  genderSection.appendChild(charGenderBtn)
-  charGenderBtn.addEventListener('click', () => {
+  genderBtn.addEventListener('click', () => {
     currentGender = currentGender === 'male' ? 'female' : 'male'
     updateGenderBtn()
     config.onGenderChange(currentGender)
   })
+  optionsRow.appendChild(genderBtn)
 
-  // Face Section
-  const faceSection = document.createElement('div')
-  faceSection.className = 'card-section'
-  faceSection.innerHTML = '<span class="card-label">Appearance</span>'
-  selectionCard.appendChild(faceSection)
-
+  // Face Button
   const faceBtn = document.createElement('button')
-  faceBtn.className = 'card-btn'
+  faceBtn.className = 'card-inline-btn'
+  faceBtn.style.flex = '1'
   const updateFaceBtn = () => {
-    faceBtn.innerHTML = `<span>Face Style</span> <span style="opacity:0.7">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
+    faceBtn.innerHTML = `Face: <span style="color:#FFD54F">${Utils.getFaceName(MeshFactories.charFaces[currentFaceIndex])}</span>`
   }
   updateFaceBtn()
-  faceSection.appendChild(faceBtn)
   faceBtn.addEventListener('click', () => {
     currentFaceIndex = (currentFaceIndex + 1) % MeshFactories.charFaces.length
     updateFaceBtn()
     config.onFaceChange(currentFaceIndex)
   })
+  optionsRow.appendChild(faceBtn)
+
+  selectionCard.appendChild(optionsRow)
 
   // Play Button
   const playBtn = document.createElement('button')
-  playBtn.innerText = 'ENTER WORLD'
+  playBtn.innerText = 'PLAY'
   playBtn.className = 'card-play-btn'
   selectionCard.appendChild(playBtn)
   playBtn.addEventListener('click', async () => {
@@ -232,6 +214,64 @@ export function createSelectionCard(config: SelectionCardConfig): SelectionCardE
 
   document.body.appendChild(selectionCard)
 
+  // Dynamic sizing based on screen height
+  function adjustCardSize() {
+    // Only apply on mobile (portrait)
+    if (window.innerWidth > 768) return
+
+    const screenHeight = window.innerHeight
+    const halfScreen = screenHeight / 2
+    const cardHeight = selectionCard.offsetHeight
+    const cardBottom = 20 // distance from bottom
+
+    // If card would take more than half screen, reduce padding
+    if (cardHeight > halfScreen - cardBottom) {
+      selectionCard.style.padding = '8px'
+      selectionCard.style.gap = '6px'
+      selectionCard.style.borderRadius = '12px'
+      // Also reduce button padding
+      const buttons = selectionCard.querySelectorAll('.card-inline-btn')
+      buttons.forEach((btn: any) => {
+        btn.style.padding = '8px 10px'
+        btn.style.fontSize = '12px'
+      })
+      const input = selectionCard.querySelector('.card-input-compact') as HTMLElement
+      if (input) {
+        input.style.padding = '8px 10px'
+        input.style.fontSize = '13px'
+      }
+      const play = selectionCard.querySelector('.card-play-btn') as HTMLElement
+      if (play) {
+        play.style.padding = '10px'
+        play.style.fontSize = '14px'
+      }
+    } else {
+      // Reset to normal sizing
+      selectionCard.style.padding = '12px'
+      selectionCard.style.gap = '10px'
+      selectionCard.style.borderRadius = '16px'
+      const buttons = selectionCard.querySelectorAll('.card-inline-btn')
+      buttons.forEach((btn: any) => {
+        btn.style.padding = '10px 14px'
+        btn.style.fontSize = '13px'
+      })
+      const input = selectionCard.querySelector('.card-input-compact') as HTMLElement
+      if (input) {
+        input.style.padding = '10px 12px'
+        input.style.fontSize = '14px'
+      }
+      const play = selectionCard.querySelector('.card-play-btn') as HTMLElement
+      if (play) {
+        play.style.padding = '14px'
+        play.style.fontSize = '16px'
+      }
+    }
+  }
+
+  // Initial check after a brief delay to allow rendering
+  setTimeout(adjustCardSize, 50)
+  // Re-check on resize
+  window.addEventListener('resize', adjustCardSize)
+
   return { card: selectionCard, usernameInput }
 }
-

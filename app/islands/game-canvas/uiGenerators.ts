@@ -82,7 +82,7 @@ export function showUpdateOverlay(liveVersion: string) {
         #update-overlay {
             flex-direction: column !important;
         }
-        #refresh-btn {
+        #continue-btn {
             display: inline-block !important;
         }
     `
@@ -109,16 +109,33 @@ export function showUpdateOverlay(liveVersion: string) {
     `
     overlay.innerHTML = `
         <h1 style="font-size: 32px; color: #FFD54F; margin-bottom: 20px;">New Version Available</h1>
-        <p style="font-size: 18px; opacity: 0.8; margin-bottom: 40px;">
-            Please update to the latest version to continue.
+        <p id="update-message" style="font-size: 18px; opacity: 0.8; margin-bottom: 40px;">
+            Please wait... <span id="countdown">30</span>
         </p>
-        <button id="refresh-btn" style="background: #FFD54F; color: black; padding: 12px 30px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer; font-size: 18px;">
-            REFRESH NOW
+        <button id="continue-btn" style="background: #FFD54F; color: black; padding: 12px 30px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer; font-size: 18px; display: none !important;">
+            Continue
         </button>
     `
     document.body.appendChild(overlay)
 
-    document.getElementById('refresh-btn')?.addEventListener('click', () => {
-        window.location.reload()
+    let secondsLeft = 30
+    const countdownEl = document.getElementById('countdown')!
+    const messageEl = document.getElementById('update-message')!
+    const continueBtn = document.getElementById('continue-btn')!
+
+    const countdownInterval = setInterval(() => {
+        secondsLeft--
+        if (countdownEl) countdownEl.innerText = String(secondsLeft)
+
+        if (secondsLeft <= 0) {
+            clearInterval(countdownInterval)
+            messageEl.innerHTML = 'Now that the game has been updated, you must log back in.'
+            continueBtn.style.display = 'inline-block'
+        }
+    }, 1000)
+
+    continueBtn.addEventListener('click', () => {
+        // Redirect to logout to destroy session and force re-login with fresh data
+        window.location.href = '/auth/logout'
     })
 }

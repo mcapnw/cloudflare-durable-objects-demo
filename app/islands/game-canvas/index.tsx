@@ -1500,11 +1500,11 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        username: (document.getElementById('admin-username') as HTMLInputElement).value || null,
-                        coins: parseInt((document.getElementById('admin-coins') as HTMLInputElement).value),
-                        weapon: (document.getElementById('admin-weapon') as HTMLSelectElement).value || null,
-                        tutorial_complete: parseInt((document.getElementById('admin-tutorial') as HTMLInputElement).value),
-                        inventory: (document.getElementById('admin-inventory') as HTMLTextAreaElement).value
+                        username: (document.getElementById('admin-username') as any).value || null,
+                        coins: parseInt((document.getElementById('admin-coins') as any).value),
+                        weapon: (document.getElementById('admin-weapon') as any).value || null,
+                        tutorial_complete: parseInt((document.getElementById('admin-tutorial') as any).value),
+                        inventory: (document.getElementById('admin-inventory') as any).value
                     })
                 })
                 if (res.ok) {
