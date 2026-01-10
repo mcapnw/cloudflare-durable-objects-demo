@@ -821,7 +821,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             } else if (data.type === 'pass_fish_complete') {
                 // Handled by state update
             } else if (data.type === 'fishing_complete') {
-                // Handled by state update
+                if (myPlayerId && data.playerId === myPlayerId) {
+                    const me = players.get(myPlayerId)
+                    if (me) {
+                        me.isActing = false
+                        me.actionType = null
+                    }
+                }
             }
         }
     }
@@ -1018,13 +1024,30 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         }
 
         // Logic for Custom Meshes (Weapons, Pole, Fish)
-        let meshToCreate = null
+        let meshToCreate: any = null
+
+        // Toggle embedded fishing rod visibility
+        let showFishingRod = false
+        if (playerData.role === 'Fisher' && !playerData.heldItem) {
+            showFishingRod = true
+        } else if (playerData.actionType === 'fishing') {
+            showFishingRod = true
+        }
+
+        playerData.mesh.traverse((child: any) => {
+            // Case-insensitive check for "fishing rod"
+            if (child.name && (child.name.toLowerCase() === 'fishing rod' || child.name.toLowerCase() === 'fishing_rod')) {
+                child.visible = showFishingRod
+                if (showFishingRod) child.frustumCulled = false
+            }
+        })
 
         if (playerData.role === 'Fisher') {
             if (playerData.heldItem === 'fish') {
                 meshToCreate = MeshFactories.createFishMesh()
             } else {
-                meshToCreate = MeshFactories.createFishingPoleMesh()
+                // Use embedded rod - logic handled above
+                meshToCreate = null
             }
         } else if (playerData.role === 'Cooker' && playerData.heldItem === 'fish') {
             meshToCreate = MeshFactories.createFishMesh()
@@ -1821,7 +1844,18 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
     fishingUI = new FishingUI({
         interactBtn,
-        onSendMessage: (msg) => { if (ws && wsConnected) ws.send(JSON.stringify(msg)) },
+        onSendMessage: (msg) => {
+            if (msg.type === 'start_fishing') {
+                if (myPlayerId) {
+                    const me = players.get(myPlayerId)
+                    if (me) {
+                        me.isActing = true
+                        me.actionType = 'fishing'
+                    }
+                }
+            }
+            if (ws && wsConnected) ws.send(JSON.stringify(msg))
+        },
         setControlsEnabled: (enabled) => { if (!enabled) { joystickDeltaX = 0; joystickDeltaY = 0; } },
         camera: camera,
         setJoystickVisible: (v) => { if (joystickContainer) joystickContainer.style.display = v ? 'block' : 'none' }
@@ -2772,6 +2806,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         let activeAction: any = null
                         if (playerData.isActing) {
                             activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
+
+                            // Check for fishing action
+                            if (playerData.actionType === 'fishing') {
+                                // Try 'fishing', 'Fishing', 'Casting', etc.
+                                activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || activeAction
+                            }
+
                             playerData.mixer.timeScale = 0.5
                         } else {
                             const run = playerData.actions['Run'] || playerData.actions['run']
@@ -2820,6 +2861,12 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 let activeAction: any = null
                 if (playerData.isActing) {
                     activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
+
+                    // Check for fishing action
+                    if (playerData.actionType === 'fishing') {
+                        activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || activeAction
+                    }
+
                     playerData.mixer.timeScale = 0.5
                 } else {
                     const run = playerData.actions['Run'] || playerData.actions['run']
@@ -2969,6 +3016,22 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     const angle = Math.atan2(nextZ - storeZ, nextX - storeX)
                     nextX = storeX + Math.cos(angle) * storeRadius
                     nextZ = storeZ + Math.sin(angle) * storeRadius
+                }
+            }
+
+            // Player collision - sliding (works everywhere)
+            const PLAYER_RADIUS = 0.8
+            const COLLISION_RADIUS = 0.6 // Radius for other players
+            for (const [id, otherPlayer] of players.entries()) {
+                if (id === myPlayerId || otherPlayer.isDead) continue
+
+                const dist = Math.hypot(nextX - otherPlayer.currentX, nextZ - otherPlayer.currentZ)
+                const minDist = PLAYER_RADIUS + COLLISION_RADIUS
+
+                if (dist < minDist && dist > 0.01) {
+                    const angle = Math.atan2(nextZ - otherPlayer.currentZ, nextX - otherPlayer.currentX)
+                    nextX = otherPlayer.currentX + Math.cos(angle) * minDist
+                    nextZ = otherPlayer.currentZ + Math.sin(angle) * minDist
                 }
             }
 

@@ -707,6 +707,9 @@ export function spawnFragments(x: number, y: number, z: number, color: number): 
     return newFragments
 }
 
+/**
+ * @deprecated Use embedded "fishing rod" object in character model instead.
+ */
 export function createFishingPoleMesh(): any {
     const group = new THREE.Group()
 

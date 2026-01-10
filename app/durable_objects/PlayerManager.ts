@@ -104,10 +104,37 @@ export class PlayerManager {
         // Randomize player spawn location in realm ONLY if no saved position exists AND not in memory
         if (room && room !== 'global-room' && !savedLoc && !this.players.has(id)) {
             const spawnRadius = 20 // Spawn within 20 units
-            const randomAngle = Math.random() * Math.PI * 2
-            const randomDistance = Math.random() * spawnRadius
-            playerData.x = Math.cos(randomAngle) * randomDistance
-            playerData.z = Math.sin(randomAngle) * randomDistance
+            const MIN_SPAWN_DISTANCE = 2 // Minimum distance from other players
+            let spawnX = 0, spawnZ = 0
+            let attempts = 0
+            const maxAttempts = 20
+
+            // Try to find a spawn location that's not too close to other players
+            do {
+                const randomAngle = Math.random() * Math.PI * 2
+                const randomDistance = Math.random() * spawnRadius
+                spawnX = Math.cos(randomAngle) * randomDistance
+                spawnZ = Math.sin(randomAngle) * randomDistance
+
+                // Check if this location is far enough from all other players
+                let tooClose = false
+                for (const [existingId, existingPlayer] of this.players) {
+                    if (existingId === id) continue
+                    const dx = spawnX - existingPlayer.x
+                    const dz = spawnZ - existingPlayer.z
+                    const distance = Math.sqrt(dx * dx + dz * dz)
+                    if (distance < MIN_SPAWN_DISTANCE) {
+                        tooClose = true
+                        break
+                    }
+                }
+
+                if (!tooClose) break
+                attempts++
+            } while (attempts < maxAttempts)
+
+            playerData.x = spawnX
+            playerData.z = spawnZ
             playerData.rotation = Math.random() * Math.PI * 2
         }
 
@@ -270,7 +297,38 @@ export class PlayerManager {
             if (tags[0] === playerId) {
                 const playerData = this.getPlayerData(ws)
                 if (playerData) {
-                    playerData.x = (Math.random() - 0.5) * 40; playerData.z = (Math.random() - 0.5) * 40; playerData.isDead = false; playerData.deathTime = 0; this.setPlayerData(ws, playerData)
+                    // Find a spawn location that's not too close to other players
+                    const MIN_SPAWN_DISTANCE = 2
+                    let spawnX = 0, spawnZ = 0
+                    let attempts = 0
+                    const maxAttempts = 20
+
+                    do {
+                        spawnX = (Math.random() - 0.5) * 40
+                        spawnZ = (Math.random() - 0.5) * 40
+
+                        // Check distance to all other players
+                        let tooClose = false
+                        for (const [otherId, otherPlayer] of this.players) {
+                            if (otherId === playerId) continue
+                            const dx = spawnX - otherPlayer.x
+                            const dz = spawnZ - otherPlayer.z
+                            const distance = Math.sqrt(dx * dx + dz * dz)
+                            if (distance < MIN_SPAWN_DISTANCE) {
+                                tooClose = true
+                                break
+                            }
+                        }
+
+                        if (!tooClose) break
+                        attempts++
+                    } while (attempts < maxAttempts)
+
+                    playerData.x = spawnX
+                    playerData.z = spawnZ
+                    playerData.isDead = false
+                    playerData.deathTime = 0
+                    this.setPlayerData(ws, playerData)
                     this.gameRoom.broadcast({ type: 'player_respawn', id: playerId, x: playerData.x, z: playerData.z, rotation: playerData.rotation, firstName: playerData.firstName, username: playerData.username, gender: playerData.gender, faceIndex: playerData.faceIndex, weapon: playerData.weapon })
                 }
                 break

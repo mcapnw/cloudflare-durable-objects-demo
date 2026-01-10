@@ -1,4 +1,4 @@
-export const CLIENT_VERSION = '1.3.44'
+export const CLIENT_VERSION = '1.3.53'
 export const BOUNDS = 24
 export const LERP_SPEED = 0.15
 export const ROTATION_LERP_SPEED = 0.2

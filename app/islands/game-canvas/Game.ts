@@ -445,12 +445,38 @@ export class Game {
                 const dx = input.x * SPEED * deltaTime
                 const dz = input.y * SPEED * deltaTime
 
-                this.state.myX += dx
-                this.state.myZ += dz
+                // Calculate new position
+                const newX = this.state.myX + dx
+                const newZ = this.state.myZ + dz
+
+                // Client-side collision detection with other players - sliding
+                const PLAYER_RADIUS = 0.8
+                const COLLISION_RADIUS = 0.6
+                let finalX = newX
+                let finalZ = newZ
+
+                for (const [playerId, playerData] of this.state.players) {
+                    if (playerId === this.state.myPlayerId) continue // Skip self
+                    if (playerData.isDead) continue // Skip dead players
+
+                    const distX = finalX - playerData.currentX
+                    const distZ = finalZ - playerData.currentZ
+                    const distance = Math.sqrt(distX * distX + distZ * distZ)
+                    const minDist = PLAYER_RADIUS + COLLISION_RADIUS
+
+                    if (distance < minDist && distance > 0.01) {
+                        const angle = Math.atan2(distZ, distX)
+                        finalX = playerData.currentX + Math.cos(angle) * minDist
+                        finalZ = playerData.currentZ + Math.sin(angle) * minDist
+                    }
+                }
+
+                this.state.myX = finalX
+                this.state.myZ = finalZ
 
                 // Clamp to world bounds
-                this.state.myX = Math.max(-25, Math.min(25, this.state.myX))
-                this.state.myZ = Math.max(-25, Math.min(25, this.state.myZ))
+                this.state.myX = Math.max(-Constants.BOUNDS, Math.min(Constants.BOUNDS, this.state.myX))
+                this.state.myZ = Math.max(-Constants.BOUNDS, Math.min(Constants.BOUNDS, this.state.myZ))
 
                 // Calculate rotation
                 this.state.myRotation = Math.atan2(-input.x, -input.y)
@@ -458,38 +484,38 @@ export class Game {
                 // Send to server
                 this.networkManager.sendMove(this.state.myX, this.state.myZ, this.state.myRotation)
             }
+        }
 
-            // Update my player mesh
-            const myPlayer = this.state.players.get(this.state.myPlayerId || '')
-            if (myPlayer) {
-                myPlayer.mesh.position.set(this.state.myX, 0, this.state.myZ)
-                myPlayer.mesh.rotation.y = this.state.myRotation + Math.PI
-                myPlayer.label.position.set(this.state.myX, 2.5, this.state.myZ)
-                if (myPlayer.mixer) {
-                    myPlayer.mixer.update(deltaTime)
+        // Update my player mesh
+        const myPlayer = this.state.players.get(this.state.myPlayerId || '')
+        if (myPlayer) {
+            myPlayer.mesh.position.set(this.state.myX, 0, this.state.myZ)
+            myPlayer.mesh.rotation.y = this.state.myRotation + Math.PI
+            myPlayer.label.position.set(this.state.myX, 2.5, this.state.myZ)
+            if (myPlayer.mixer) {
+                myPlayer.mixer.update(deltaTime)
 
-                    // Animation switching
-                    if (myPlayer.actions) {
-                        const hasInput = this.inputManager.hasMovementInput()
-                        const run = myPlayer.actions['Run'] || myPlayer.actions['run']
-                        const walk = myPlayer.actions['walking'] || myPlayer.actions['Walk'] || myPlayer.actions['walk']
+                // Animation switching
+                if (myPlayer.actions) {
+                    const hasInput = this.inputManager.hasMovementInput()
+                    const run = myPlayer.actions['Run'] || myPlayer.actions['run']
+                    const walk = myPlayer.actions['walking'] || myPlayer.actions['Walk'] || myPlayer.actions['walk']
 
-                        // Check if player has the staff_beginner weapon
-                        const hasStaffBeginner = myPlayer.weapon === 'staff_beginner'
-                        const idle = hasStaffBeginner
-                            ? (myPlayer.actions['Idle'] || myPlayer.actions['idle'])
-                            : (myPlayer.actions['idle_noweapon'] || myPlayer.actions['Idle'] || myPlayer.actions['idle'])
+                    // Check if player has the staff_beginner weapon
+                    const hasStaffBeginner = myPlayer.weapon === 'staff_beginner'
+                    const idle = hasStaffBeginner
+                        ? (myPlayer.actions['Idle'] || myPlayer.actions['idle'])
+                        : (myPlayer.actions['idle_noweapon'] || myPlayer.actions['Idle'] || myPlayer.actions['idle'])
 
-                        const activeAction = (hasInput && (walk || run)) ? (walk || run) : idle
+                    const activeAction = (hasInput && (walk || run)) ? (walk || run) : idle
 
-                        if (activeAction && !activeAction.isRunning()) {
-                            // Stop all other animations to prevent blending issues
-                            Object.values(myPlayer.actions).forEach((act: any) => {
-                                if (act !== activeAction) act.fadeOut(0.2)
-                            })
+                    if (activeAction && !activeAction.isRunning()) {
+                        // Stop all other animations to prevent blending issues
+                        Object.values(myPlayer.actions).forEach((act: any) => {
+                            if (act !== activeAction) act.fadeOut(0.2)
+                        })
 
-                            activeAction.reset().fadeIn(0.2).play()
-                        }
+                        activeAction.reset().fadeIn(0.2).play()
                     }
                 }
             }
@@ -515,6 +541,8 @@ export class Game {
     }
 
     private updateCamera() {
+        if (!this.state.camera) return
+
         if (this.state.currentMode === 'spectate') {
             this.state.spectateRotationOffset += 0.003
             const radius = 30
@@ -537,7 +565,7 @@ export class Game {
         if (this.state.dragon && !this.state.dragon.isDead && this.state.dragon.wings) {
             const time = Date.now() * 0.005
             this.state.dragon.wings.forEach((wing: any, i: number) => {
-                const baseAngle = i === 0 ? -0.3 : 0.3
+                const baseAngle = (i === 0) ? -0.3 : 0.3
                 const flapAngle = Math.sin(time) * 0.4
                 wing.rotation.z = baseAngle + flapAngle
             })
@@ -547,8 +575,10 @@ export class Game {
     private animatePickups(deltaTime: number) {
         const time = Date.now() * 0.003
         this.state.pickups.forEach(pickup => {
-            pickup.mesh.position.y = 0.5 + Math.sin(time) * 0.2
-            pickup.mesh.rotation.y += deltaTime * 2
+            if (pickup.mesh) {
+                pickup.mesh.position.y = 0.5 + Math.sin(time) * 0.2
+                pickup.mesh.rotation.y += deltaTime * 2
+            }
         })
     }
 
@@ -582,7 +612,6 @@ export class Game {
         }
 
         // Check for pickup proximity
-        let nearPickup = false
         this.state.pickups.forEach((pickup, id) => {
             if (pickup.playerId !== this.state.myPlayerId) return
             const dist = Math.sqrt(
@@ -590,7 +619,6 @@ export class Game {
                 Math.pow(this.state.myZ - pickup.z, 2)
             )
             if (dist < 2) {
-                nearPickup = true
                 this.networkManager.sendCollectPickup(id)
             }
         })
@@ -613,7 +641,7 @@ export class Game {
         }
     }
 
-    destroy() {
+    public destroy() {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId)
         }
