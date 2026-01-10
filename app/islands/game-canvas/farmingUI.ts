@@ -264,11 +264,15 @@ export class FarmingUI {
 
                 // Restore weapon visibility
                 if (currentP.weaponMesh) currentP.weaponMesh.visible = true
-                currentP.mesh.traverse((child: any) => {
-                    if (child.name === 'staff_beginner' && currentP.weapon === 'staff_beginner') {
-                        child.visible = true
-                    }
-                })
+                // Only restore staff if player is NOT in Realm (has no role)
+                const hasRealmRole = currentP.role && currentP.role !== 'None'
+                if (!hasRealmRole) {
+                    currentP.mesh.traverse((child: any) => {
+                        if (child.name === 'staff_beginner' && currentP.weapon === 'staff_beginner') {
+                            child.visible = true
+                        }
+                    })
+                }
 
                 updateUIVisibility()
                 this.config.setJoystickVisible(true)
@@ -350,11 +354,15 @@ export class FarmingUI {
         } else {
             // Restore weapon visibility
             if (playerData.weaponMesh) playerData.weaponMesh.visible = true
-            playerData.mesh.traverse((child: any) => {
-                if (child.name === 'staff_beginner' && playerData.weapon === 'staff_beginner') {
-                    child.visible = true
-                }
-            })
+            // Only restore staff if player is NOT in Realm (has no role)
+            const hasRealmRole = playerData.role && playerData.role !== 'None'
+            if (!hasRealmRole) {
+                playerData.mesh.traverse((child: any) => {
+                    if (child.name === 'staff_beginner' && playerData.weapon === 'staff_beginner') {
+                        child.visible = true
+                    }
+                })
+            }
 
             // Remove temporary tool
             if (playerData.temporaryToolMesh) {

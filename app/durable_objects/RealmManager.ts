@@ -178,8 +178,8 @@ export class RealmManager {
 
             // Check start condition
             const readyCount = allPlayers.filter(p => p.ready).length
-            // Require at least 2 players to start
-            if (allPlayers.length >= 2 && readyCount === allPlayers.length) {
+            // Require at least 1 player to start
+            if (allPlayers.length >= 1 && readyCount === allPlayers.length) {
                 this.startRealm(allPlayers)
             }
         }
@@ -193,9 +193,11 @@ export class RealmManager {
         const shuffled = [...players].sort(() => 0.5 - Math.random())
         const roles: PlayerRole[] = []
 
-        // Logic: 2 players = 1 Fisher, 1 Cooker. 
+        // Logic: 1 player = 1 Fisher. 2 players = 1 Fisher, 1 Cooker. 
         // 3+ players: 2 Fishers, rest Cookers.
-        if (players.length === 2) {
+        if (players.length === 1) {
+            roles.push('Fisher')
+        } else if (players.length === 2) {
             roles.push('Fisher', 'Cooker')
         } else {
             roles.push('Fisher', 'Fisher')

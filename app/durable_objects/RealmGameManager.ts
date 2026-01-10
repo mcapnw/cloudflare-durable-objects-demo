@@ -94,10 +94,10 @@ export class RealmGameManager {
             type: 'player_action',
             id: playerId,
             actionType: 'fishing',
-            duration: 10000
+            duration: 2500
         })
 
-        // Schedule Completion (10 seconds)
+        // Schedule Completion (2.5 seconds)
         setTimeout(() => {
             const p = this.gameRoom.playerManager.players.get(playerId)
             if (p && p.isActing && p.actionType === 'fishing') {
@@ -113,7 +113,7 @@ export class RealmGameManager {
                 // Successful fish! Advance to next pond
                 this.rotateActivePond(Date.now())
             }
-        }, 10000)
+        }, 2500)
     }
 
     passFish(fisherId: string) {

@@ -1,7 +1,7 @@
 export function createTextSprite(THREE: any, text: string, isMe: boolean, textColor: string = '#FFFFFF', bgColor: string = 'transparent'): any {
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')!
-    canvas.width = 256
+    canvas.width = 640
     canvas.height = 64
 
     if (bgColor !== 'transparent') {
@@ -9,7 +9,7 @@ export function createTextSprite(THREE: any, text: string, isMe: boolean, textCo
         context.fillRect(0, 0, canvas.width, canvas.height)
     }
 
-    context.font = 'Bold 32px Arial'
+    context.font = 'Bold 48px Arial'  // 1.5x larger than sheep text (32px)
     context.fillStyle = textColor
     context.textAlign = 'center'
     context.textBaseline = 'middle'
@@ -22,13 +22,15 @@ export function createTextSprite(THREE: any, text: string, isMe: boolean, textCo
         context.shadowOffsetY = 0
     }
 
-    context.fillText(text, 128, 32)
+    context.fillText(text, 320, 32)
 
     const texture = new THREE.CanvasTexture(canvas)
     const material = new THREE.SpriteMaterial({ map: texture })
     const sprite = new THREE.Sprite(material)
-    // Standard base scale consistent with Dragon (Double size -> 4 width, 1 height)
-    sprite.scale.set(4, 1.0, 1)
+    // Scale 1.5x bigger than sheep text while maintaining proper proportions
+    // Sheep: 256x64 canvas with 4x1 scale
+    // This: 640x64 canvas with 8x1.5 scale = wider and taller for better readability
+    sprite.scale.set(8, 1.5, 1)
 
     return sprite
 }

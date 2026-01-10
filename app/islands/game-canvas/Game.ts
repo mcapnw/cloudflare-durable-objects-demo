@@ -465,7 +465,33 @@ export class Game {
                 myPlayer.mesh.position.set(this.state.myX, 0, this.state.myZ)
                 myPlayer.mesh.rotation.y = this.state.myRotation + Math.PI
                 myPlayer.label.position.set(this.state.myX, 2.5, this.state.myZ)
-                if (myPlayer.mixer) myPlayer.mixer.update(deltaTime)
+                if (myPlayer.mixer) {
+                    myPlayer.mixer.update(deltaTime)
+
+                    // Animation switching
+                    if (myPlayer.actions) {
+                        const hasInput = this.inputManager.hasMovementInput()
+                        const run = myPlayer.actions['Run'] || myPlayer.actions['run']
+                        const walk = myPlayer.actions['walking'] || myPlayer.actions['Walk'] || myPlayer.actions['walk']
+
+                        // Check if player has the staff_beginner weapon
+                        const hasStaffBeginner = myPlayer.weapon === 'staff_beginner'
+                        const idle = hasStaffBeginner
+                            ? (myPlayer.actions['Idle'] || myPlayer.actions['idle'])
+                            : (myPlayer.actions['idle_noweapon'] || myPlayer.actions['Idle'] || myPlayer.actions['idle'])
+
+                        const activeAction = (hasInput && (walk || run)) ? (walk || run) : idle
+
+                        if (activeAction && !activeAction.isRunning()) {
+                            // Stop all other animations to prevent blending issues
+                            Object.values(myPlayer.actions).forEach((act: any) => {
+                                if (act !== activeAction) act.fadeOut(0.2)
+                            })
+
+                            activeAction.reset().fadeIn(0.2).play()
+                        }
+                    }
+                }
             }
         }
 

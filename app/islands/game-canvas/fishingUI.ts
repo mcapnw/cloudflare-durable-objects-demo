@@ -12,7 +12,7 @@ export interface FishingUIConfig {
 
 export class FishingUI {
     private config: FishingUIConfig
-    private isAnimationLocked: boolean = false
+    public isAnimationLocked: boolean = false
 
     constructor(config: FishingUIConfig) {
         this.config = config
@@ -94,43 +94,77 @@ export class FishingUI {
         const cooker = players.get(cookerId)
 
         if (fisher && cooker) {
-            // 1. Face each other
-            fisher.mesh.lookAt(cooker.currentX, 0, cooker.currentZ)
-            cooker.mesh.lookAt(fisher.currentX, 0, fisher.currentZ)
+            // 1. Face each other using direct angle calculation (more reliable than lookAt)
+            const angle = Math.atan2(
+                cooker.currentX - fisher.currentX,
+                cooker.currentZ - fisher.currentZ
+            )
+            fisher.mesh.rotation.y = angle
+            cooker.mesh.rotation.y = angle + Math.PI // Face opposite direction
 
-            // Override target rotation to prevent immediate snap-back if update comes
-            fisher.targetRotation = fisher.mesh.rotation.y
-            cooker.targetRotation = cooker.mesh.rotation.y
+            // Override target rotation to prevent snap-back from updates
+            fisher.targetRotation = angle
+            cooker.targetRotation = angle + Math.PI
 
-            // 2. Camera Side View
+            // 2. Arm reaching animation - find arm/hand bones
+            const fisherArm = fisher.mesh.getObjectByName('hands') ||
+                fisher.mesh.getObjectByName('leftHand')
+            const cookerArm = cooker.mesh.getObjectByName('hands') ||
+                cooker.mesh.getObjectByName('leftHand')
+
+            // Store original rotations to restore later
+            const fisherArmOriginalRot = fisherArm ? { x: fisherArm.rotation.x, y: fisherArm.rotation.y, z: fisherArm.rotation.z } : null
+            const cookerArmOriginalRot = cookerArm ? { x: cookerArm.rotation.x, y: cookerArm.rotation.y, z: cookerArm.rotation.z } : null
+
+            // Animate arms reaching out
+            if (fisherArm) {
+                fisherArm.rotation.x = -Math.PI / 4 // Reach forward
+                fisherArm.rotation.z = -Math.PI / 6 // Extend outward
+            }
+            if (cookerArm) {
+                cookerArm.rotation.x = -Math.PI / 4 // Reach forward  
+                cookerArm.rotation.z = Math.PI / 6 // Extend outward (opposite direction)
+            }
+
+            // 3. Camera Side View - position perpendicular to the line between players
             const midX = (fisher.currentX + cooker.currentX) / 2
             const midZ = (fisher.currentZ + cooker.currentZ) / 2
 
             const dx = fisher.currentX - cooker.currentX
             const dz = fisher.currentZ - cooker.currentZ
-            // Perpendicular vector (-dz, dx)
-            const len = Math.hypot(dx, dz)
-            const pX = -dz / len
-            const pZ = dx / len
+            const distBetweenPlayers = Math.hypot(dx, dz)
 
-            // Position camera 5 units away perpendicular
-            const camX = midX + pX * 5
-            const camZ = midZ + pZ * 5
+            // Perpendicular vector - try both directions and pick one consistently
+            // Use the direction that keeps camera south/west of midpoint for consistency
+            let pX = distBetweenPlayers > 0 ? -dz / distBetweenPlayers : 1
+            let pZ = distBetweenPlayers > 0 ? dx / distBetweenPlayers : 0
 
-            // Tween approach (simplified here to direct set for prototype)
-            // In a real app we'd lerp.
-            const originalPos = this.config.camera.position.clone()
-            const originalRot = this.config.camera.rotation.clone()
+            // Camera distance based on how far apart players are, minimum 3.5 units
+            // User requested closer view
+            const cameraDistance = Math.max(3.5, distBetweenPlayers * 0.8 + 2)
 
-            this.config.camera.position.set(camX, 2, camZ)
-            this.config.camera.lookAt(midX, 1.0, midZ)
+            // Position camera perpendicular to the line between players
+            const camX = midX + pX * cameraDistance
+            const camZ = midZ + pZ * cameraDistance
 
-            // 3. Restore after duration
+            // Set camera position and look at midpoint between players
+            this.config.camera.position.set(camX, 2.5, camZ)
+            this.config.camera.lookAt(midX, 1.5, midZ)
+
+            // 4. Restore after duration
             setTimeout(() => {
                 this.isAnimationLocked = false
                 this.config.setControlsEnabled(true)
                 this.config.setJoystickVisible(true)
-                // Camera will snap back to follow player mechanism in next frame of main loop
+
+                // Restore arm rotations
+                if (fisherArm && fisherArmOriginalRot) {
+                    fisherArm.rotation.set(fisherArmOriginalRot.x, fisherArmOriginalRot.y, fisherArmOriginalRot.z)
+                }
+                if (cookerArm && cookerArmOriginalRot) {
+                    cookerArm.rotation.set(cookerArmOriginalRot.x, cookerArmOriginalRot.y, cookerArmOriginalRot.z)
+                }
+                // Camera will snap back to follow player mechanism in next frame
             }, duration)
         } else {
             // Fallback if players missing

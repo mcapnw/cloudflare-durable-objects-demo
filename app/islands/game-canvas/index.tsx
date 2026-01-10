@@ -991,12 +991,12 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     function updatePlayerWeapon(playerData: Types.PlayerData, newWeapon: string | null) {
         playerData.weapon = newWeapon
 
-        // Hide/Show Staff
+        // Hide/Show Staff - Hide in Realm for ALL players with a role
+        const hasRole = playerData.role && playerData.role !== 'None'
         playerData.mesh.traverse((child: any) => {
-            if (child.name === 'staff_beginner') {
-                // Only show staff if generic weapon OR staff_beginner AND NOT Fisher (Fishers use pole)
-                const isFisher = playerData.role === 'Fisher'
-                child.visible = (newWeapon === 'staff_beginner') && !isFisher
+            if (child.name === 'staff_beginner' || child.name.includes('staff')) {
+                // Hide staff if player has a role (in Realm) or if weapon isn't staff_beginner
+                child.visible = !hasRole && (newWeapon === 'staff_beginner')
                 if (child.visible) child.frustumCulled = false
             }
         })
@@ -1008,8 +1008,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             playerData.weaponMesh = null
         }
 
-        // Force hide default staff if Fisher (in case it persists from base model)
-        if (playerData.role === 'Fisher') {
+        // Force hide default staff if in Realm (has any role)
+        if (hasRole) {
             playerData.mesh.traverse((child: any) => {
                 if (child.name === 'staff_beginner' || child.name.includes('staff')) {
                     child.visible = false
@@ -1033,54 +1033,108 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         }
 
         if (meshToCreate) {
-            // Helper to find bone recursively
-            const findBone = (obj: any, name: string): any | null => {
-                if (obj.name === name || obj.name.includes(name)) return obj
+            // Helper to find ACTUAL bones (isBone=true) recursively
+            const findActualBone = (obj: any, name: string): any | null => {
+                const lowerName = name.toLowerCase()
+                if (obj.isBone && obj.name && obj.name.toLowerCase().includes(lowerName)) return obj
                 for (const child of obj.children) {
-                    const found = findBone(child, name)
+                    const found = findActualBone(child, name)
                     if (found) return found
                 }
                 return null
             }
 
-            // Expanded Bone Search
-            let handBone = playerData.mesh.getObjectByName('RightHand') ||
-                playerData.mesh.getObjectByName('mixamorigRightHand') ||
-                playerData.mesh.getObjectByName('hand_R') ||
-                playerData.mesh.getObjectByName('mixamorig:RightHand')
+            // Collect ALL bones and ALL objects with 'hand' in name for debug
+            const allBones: string[] = []
+            const allHandObjects: string[] = []
+            let skeletonBones: any[] = []
 
+            playerData.mesh.traverse((child: any) => {
+                if (child.isBone) {
+                    allBones.push(child.name)
+                }
+                if (child.name && child.name.toLowerCase().includes('hand')) {
+                    allHandObjects.push(`${child.name} (isBone: ${child.isBone})`)
+                }
+                // Try to get skeleton from SkinnedMesh
+                if (child.isSkinnedMesh && child.skeleton && child.skeleton.bones) {
+                    skeletonBones = child.skeleton.bones
+                }
+            })
+            console.log('[BoneDebug] All isBone objects:', allBones)
+            console.log('[BoneDebug] All hand objects:', allHandObjects)
+            console.log('[BoneDebug] Skeleton bones count:', skeletonBones.length)
+
+            // Log skeleton bone names if available
+            if (skeletonBones.length > 0) {
+            }
+
+            // Try to find hand bone from skeleton first
+            let handBone = null
+            if (skeletonBones.length > 0) {
+
+                // Search for leftHand specifically (exact match or partial)
+                handBone = skeletonBones.find((b: any) => b.name === 'leftHand')
+                if (!handBone) {
+                    handBone = skeletonBones.find((b: any) =>
+                        b.name.toLowerCase().includes('lefthand') ||
+                        b.name.toLowerCase().includes('righthand') ||
+                        b.name.toLowerCase().includes('hand_l') ||
+                        b.name.toLowerCase().includes('hand_r') ||
+                        b.name.toLowerCase() === 'hand.l' ||
+                        b.name.toLowerCase() === 'hand.r'
+                    )
+                }
+
+            }
+
+            // Fallback to recursive search for actual bones
             if (!handBone) {
-                // Try deep search for any "RightHand"
-                handBone = findBone(playerData.mesh, 'RightHand')
+                handBone = findActualBone(playerData.mesh, 'leftHand') ||
+                    findActualBone(playerData.mesh, 'rightHand') ||
+                    findActualBone(playerData.mesh, 'Hand')
+            }
+
+            // Last resort: find any object named 'hands' even if not a bone
+            if (!handBone) {
+                handBone = playerData.mesh.getObjectByName('hands') ||
+                    playerData.mesh.getObjectByName('leftHand')
+
             }
 
             if (handBone) {
-                console.log('[Visuals] Attaching weapon/tool to bone:', handBone.name)
-
                 // Determine if custom tool (Pole/Fish) or standard
                 const isCustomTool = (playerData.role === 'Fisher' && !playerData.heldItem)
+                const isFish = (playerData.heldItem === 'fish')
 
                 if (isCustomTool) {
-                    // Fishing Pole Specifics
+                    // Fishing Pole - rod mesh is now vertical Y-up in mesh factory
                     meshToCreate.position.set(0, 0, 0)
-                    meshToCreate.rotation.set(0, 0, 0)
-                    // Tune rotation for Mixamo Right Hand (Thumb +X, Fingers +Z usually)
-                    // Pole is Y-up.
-                    meshToCreate.rotation.x = -Math.PI / 2
-                    meshToCreate.rotation.y = -Math.PI / 2
-                } else if (playerData.heldItem === 'fish') {
-                    meshToCreate.position.set(0, 0.4, 0)
-                    meshToCreate.scale.set(0.5, 0.5, 0.5)
+                    meshToCreate.scale.set(2, 2, 2) // Compensate for 0.5 player scale
+
+                    // Rotate X by ~-80 degrees (-1.4 rad) to point it forward/out from hand
+                    // Adjust Y/Z if needed to prevent left/right tilt.
+                    // Assuming hand bone Y is up, Z is out?
+                    // Let's try pointing it "Forward" (-PI/2 on X) + "Slightly Up" (+0.2-0.3 rad)
+                    // Result: -PI/2 + 0.3 = -1.27
+                    meshToCreate.rotation.set(-1.3, 0, 0)
+                    // If it leaned left/right before, we might need Z rotation.
+                    // But start with pure forward pitch.
+                } else if (isFish) {
+                    // Fish - held in hand
+                    meshToCreate.position.set(0.2, 0, 0)
+                    meshToCreate.scale.set(1, 1, 1) // Compensate for 0.5 player scale  
+                    meshToCreate.rotation.set(0, 0, Math.PI / 2)
                 } else {
                     // Standard Weapon
                     meshToCreate.position.set(0, 0, 0)
-                    meshToCreate.scale.set(3, 3, 3)
+                    meshToCreate.scale.set(6, 6, 6) // 3 * 2 to compensate for 0.5 player scale
                     meshToCreate.rotation.set(0, -Math.PI / 2, Math.PI / 2)
                 }
 
                 handBone.add(meshToCreate)
             } else {
-                console.warn('[Visuals] Hand bone not found! Using body fallback.')
+
                 // Fallback
                 const isCustomTool = (playerData.role === 'Fisher' && !playerData.heldItem)
                 if (isCustomTool) {
@@ -2719,10 +2773,15 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         if (playerData.isActing) {
                             activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
                             playerData.mixer.timeScale = 0.5
-                        } else {
                             const run = playerData.actions['Run'] || playerData.actions['run']
                             const walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
-                            const idle = playerData.actions['idle'] || playerData.actions['Idle']
+
+                            // Check if player has the staff_beginner weapon
+                            const hasStaffBeginner = playerData.weapon === 'staff_beginner'
+                            const idle = hasStaffBeginner
+                                ? (playerData.actions['Idle'] || playerData.actions['idle'])
+                                : (playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle'])
+
                             activeAction = (isMoving && (walk || run)) ? (walk || run) : idle
                             playerData.mixer.timeScale = 1.0
                         }
@@ -2735,9 +2794,17 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                             }
                         }
                     }
-                    // Update farming tool meshes
-                    farmingUI.updateToolMeshForPlayer(playerData, THREE)
-                    if (playerData.weaponMesh && !playerData.mesh.getObjectByName('hand_R')) {
+                    // Only skip farming tool update if player has realm role (Fisher/Cooker handle their own tools)
+                    const hasRealmRole = playerData.role && playerData.role !== 'None'
+                    if (!hasRealmRole) {
+                        farmingUI.updateToolMeshForPlayer(playerData, THREE)
+                    }
+                    // Only float/spin weapon if NOT attached to a bone (fallback case)
+                    // Check for bone names that exist in this model: hands, leftHand
+                    const hasHandBone = playerData.mesh.getObjectByName('hands') ||
+                        playerData.mesh.getObjectByName('leftHand') ||
+                        playerData.mesh.getObjectByName('hand_R')
+                    if (playerData.weaponMesh && !hasHandBone) {
                         playerData.weaponMesh.rotation.y += 0.02
                         playerData.weaponMesh.position.y = 2.0 + Math.sin(now * 0.003) * 0.1
                     }
@@ -2756,7 +2823,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 } else {
                     const run = playerData.actions['Run'] || playerData.actions['run']
                     const walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
-                    const idle = playerData.actions['idle'] || playerData.actions['Idle']
+
+                    // Check if player has the staff_beginner weapon
+                    const hasStaffBeginner = playerData.weapon === 'staff_beginner'
+                    const idle = hasStaffBeginner
+                        ? (playerData.actions['Idle'] || playerData.actions['idle'])
+                        : (playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle'])
+
                     activeAction = (hasInput && (walk || run)) ? (walk || run) : idle
                     playerData.mixer.timeScale = 1.0
                 }
@@ -2770,8 +2843,11 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 }
             }
             if (playerData) {
-                // Update farming tool meshes for local player
-                farmingUI.updateToolMeshForPlayer(playerData, THREE)
+                // Only update farming tool for non-realm players
+                const hasRealmRole = playerData.role && playerData.role !== 'None'
+                if (!hasRealmRole) {
+                    farmingUI.updateToolMeshForPlayer(playerData, THREE)
+                }
             }
         }
 
@@ -2837,34 +2913,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         myX,
                         myZ
                     )
-                    // Update on-screen debug overlay (for mobile)
-                    let debugOverlay = document.getElementById('fishing-debug-overlay') as HTMLDivElement
-                    if (!debugOverlay) {
-                        debugOverlay = document.createElement('div')
-                        debugOverlay.id = 'fishing-debug-overlay'
-                        debugOverlay.style.cssText = 'position:fixed;top:10px;left:10px;background:rgba(0,0,0,0.8);color:#0f0;font-family:monospace;font-size:12px;padding:10px;z-index:10000;max-width:320px;pointer-events:none;'
-                        document.body.appendChild(debugOverlay)
-                    }
-                    const activePond = pondsState.find(p => p.active)
-                    // Use myX/myZ (actual local position) not me.currentX (may be stale)
-                    const distToActive = activePond ? Math.hypot(myX - activePond.x, myZ - activePond.z).toFixed(1) : 'N/A'
-
-                    // Weapon debug
-                    const weaponInfo = localPlayer.weaponMesh ?
-                        `attached to: ${localPlayer.weaponMesh.parent?.name || 'body'}` :
-                        'none'
-
-                    debugOverlay.innerHTML = `
-                        <b>Fishing Debug</b><br>
-                        Role: ${localPlayer.role || 'undefined'}<br>
-                        HeldItem: ${localPlayer.heldItem || 'none'}<br>
-                        MyPos: (${myX.toFixed(1)}, ${myZ.toFixed(1)})<br>
-                        Ponds: ${pondsState.length}<br>
-                        Active Pond: ${activePond ? `(${activePond.x}, ${activePond.z})` : 'NONE'}<br>
-                        Dist to Active: ${distToActive}<br>
-                        Handled: ${fishingHandled}<br>
-                        <b>Weapon:</b> ${weaponInfo}
-                    `
+                    if (fishingHandled) handled = true
                     if (fishingHandled) handled = true
                 }
 
@@ -2957,7 +3006,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             if (!myIsDead && currentMode === 'game') {
                 shootBtn.style.display = (dragon && !dragon.isDead) ? 'flex' : 'none'
             }
-            if (playerData.weaponMesh) {
+            // Only spin/float weapon for non-realm players (realm players have proper bone attachment)
+            const hasRealmRole = playerData.role && playerData.role !== 'None'
+            if (playerData.weaponMesh && !hasRealmRole) {
                 playerData.weaponMesh.rotation.y += 0.02
                 playerData.weaponMesh.position.y = 2.0 + Math.sin(now * 0.003) * 0.1
             }
@@ -3006,45 +3057,64 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             } else {
                 // Game mode
                 const playerData = players.get(myPlayerId)
-                if (playerData && playerData.isActing) {
-                    // Farming View: Closer to a front view but still slightly off to the side
-                    // Front is myRotation + PI.
-                    // Slightly off to the side -> + 0.5 radians (approx 30 degrees)
-                    const camDistance = 3.5
-                    const camHeight = 1.6
-                    const frontSideAngle = myRotation + Math.PI + 0.5
 
-                    const targetCamX = myX + Math.sin(frontSideAngle) * camDistance
-                    const targetCamZ = myZ + Math.cos(frontSideAngle) * camDistance
+                // Check if fishingUI has animation lock (don't override camera during pass_fish)
+                const isFishingAnimationLocked = fishingUI && fishingUI.isAnimationLocked
 
-                    // Immediate snap (No Lerp)
-                    camera.position.set(targetCamX, camHeight, targetCamZ)
+                if (!isFishingAnimationLocked) {
+                    if (playerData && playerData.isActing && playerData.actionType === 'fishing') {
+                        // Fishing Side View: Camera to the side of the player, facing them
+                        // Find the active pond to position camera looking toward it
+                        const activePond = pondsState.find(p => p.active)
+                        const camDistance = 4.0
+                        const camHeight = 1.8
 
-                    // Look at player center
-                    // We need a dummy target to interp lookAt? 
-                    // Or just lookAt every frame.
-                    camera.lookAt(myX, 1.5, myZ)
-                } else {
-                    // Normal Third Person
-                    const camDistance = 7.5
-                    const camHeight = 5
-                    const camX = myX + Math.sin(myRotation) * camDistance
-                    const camZ = myZ + Math.cos(myRotation) * camDistance
+                        if (activePond) {
+                            // Position camera perpendicular to player-pond line
+                            const dx = activePond.x - myX
+                            const dz = activePond.z - myZ
+                            const len = Math.hypot(dx, dz)
+                            // Perpendicular vector
+                            const perpX = len > 0 ? -dz / len : 1
+                            const perpZ = len > 0 ? dx / len : 0
 
-                    // Standard View - Rigid (No Lerp to prevent lag/acceleration effect)
-                    // "Lower two thirds" -> Character sits lower in frame -> Look above character
-                    camera.position.set(camX, camHeight, camZ)
-                    camera.lookAt(myX, 2.5, myZ) // Look closer to head height (2.5) to balance frame (was 4)
-                    // If user wants character in "lower two thirds" (i.e. bottom part of screen), we should look HIGHER. 
-                    // Let's try LookAt Y=2.0 (Head height approx). This centers the character vertically.
-                    // If we want them Lower, we look Higher? No wait.
-                    // LookAt(Head) -> Head is Center. Feet are Below Center.
-                    // LookAt(Above Head) -> Head is Below Center.
-                    // User said "lower two third". 
-                    // I will stick to rigid camera and a standard offset.
-                    // Let's use Y=3.0 for lookAt.
-                    camera.lookAt(myX, 3.5, myZ)
+                            const camX = myX + perpX * camDistance
+                            const camZ = myZ + perpZ * camDistance
+                            camera.position.set(camX, camHeight, camZ)
+                            // Look at point between player and pond
+                            const midX = (myX + activePond.x) / 2
+                            const midZ = (myZ + activePond.z) / 2
+                            camera.lookAt(midX, 1.2, midZ)
+                        } else {
+                            // Fallback: side view of player
+                            const sideAngle = myRotation + Math.PI / 2
+                            const camX = myX + Math.sin(sideAngle) * camDistance
+                            const camZ = myZ + Math.cos(sideAngle) * camDistance
+                            camera.position.set(camX, camHeight, camZ)
+                            camera.lookAt(myX, 1.2, myZ)
+                        }
+                    } else if (playerData && playerData.isActing) {
+                        // Farming View: Closer to a front view but still slightly off to the side
+                        const camDistance = 3.5
+                        const camHeight = 1.6
+                        const frontSideAngle = myRotation + Math.PI + 0.5
+
+                        const targetCamX = myX + Math.sin(frontSideAngle) * camDistance
+                        const targetCamZ = myZ + Math.cos(frontSideAngle) * camDistance
+                        camera.position.set(targetCamX, camHeight, targetCamZ)
+                        camera.lookAt(myX, 1.5, myZ)
+                    } else {
+                        // Normal Third Person
+                        const camDistance = 7.5
+                        const camHeight = 5
+                        const camX = myX + Math.sin(myRotation) * camDistance
+                        const camZ = myZ + Math.cos(myRotation) * camDistance
+                        camera.position.set(camX, camHeight, camZ)
+                        camera.lookAt(myX, 2.5, myZ)
+                        camera.lookAt(myX, 3.5, myZ)
+                    }
                 }
+                // If animation locked, don't change camera (let fishingUI control it)
             }
         }
         if (lobbyState) {

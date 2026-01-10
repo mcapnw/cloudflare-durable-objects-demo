@@ -224,6 +224,15 @@ export class PlayerManager {
                         weapon: playerData.weapon
                     })
                     this.players.delete(playerId)
+
+                    // If in Realm and only 1 player remains, make them Fisher
+                    if (this.gameRoom.realmManager.isRealm && this.players.size === 1) {
+                        const remaining = this.players.values().next().value
+                        if (remaining && remaining.role !== 'Fisher') {
+                            remaining.role = 'Fisher'
+                            remaining.heldItem = null
+                        }
+                    }
                 }
                 this.gameRoom.broadcast({ type: 'leave', id: playerId })
 
