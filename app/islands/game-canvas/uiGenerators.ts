@@ -1,15 +1,27 @@
 export function createTextSprite(THREE: any, text: string, isMe: boolean, textColor: string = '#FFFFFF', bgColor: string = 'transparent'): any {
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')!
-    canvas.width = 640
-    canvas.height = 64
+
+    // Set font first to measure text
+    const fontSize = 32  // Same as sheep
+    context.font = `Bold ${fontSize}px Arial`
+
+    // Measure text and add padding
+    const metrics = context.measureText(text)
+    const textWidth = metrics.width
+    const padding = 40  // 20px padding on each side
+
+    // Set canvas size based on text width
+    canvas.width = Math.max(256, Math.ceil(textWidth + padding))  // Minimum 256px like sheep
+    canvas.height = 64  // Same as sheep
 
     if (bgColor !== 'transparent') {
         context.fillStyle = bgColor
         context.fillRect(0, 0, canvas.width, canvas.height)
     }
 
-    context.font = 'Bold 48px Arial'  // 1.5x larger than sheep text (32px)
+    // Re-apply font after canvas resize (canvas resize clears context)
+    context.font = `Bold ${fontSize}px Arial`
     context.fillStyle = textColor
     context.textAlign = 'center'
     context.textBaseline = 'middle'
@@ -22,15 +34,16 @@ export function createTextSprite(THREE: any, text: string, isMe: boolean, textCo
         context.shadowOffsetY = 0
     }
 
-    context.fillText(text, 320, 32)
+    context.fillText(text, canvas.width / 2, 32)
 
     const texture = new THREE.CanvasTexture(canvas)
     const material = new THREE.SpriteMaterial({ map: texture })
     const sprite = new THREE.Sprite(material)
-    // Scale 1.5x bigger than sheep text while maintaining proper proportions
-    // Sheep: 256x64 canvas with 4x1 scale
-    // This: 640x64 canvas with 8x1.5 scale = wider and taller for better readability
-    sprite.scale.set(8, 1.5, 1)
+
+    // Scale proportionally: maintain sheep's ratio but adjust width based on canvas
+    // Sheep uses 4x1 for 256x64, so we use (canvas.width/256)*4 x 1
+    const scaleX = (canvas.width / 256) * 4
+    sprite.scale.set(scaleX, 1.0, 1)
 
     return sprite
 }

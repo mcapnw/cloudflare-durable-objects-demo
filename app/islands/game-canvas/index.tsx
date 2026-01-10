@@ -2773,6 +2773,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         if (playerData.isActing) {
                             activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
                             playerData.mixer.timeScale = 0.5
+                        } else {
                             const run = playerData.actions['Run'] || playerData.actions['run']
                             const walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
 

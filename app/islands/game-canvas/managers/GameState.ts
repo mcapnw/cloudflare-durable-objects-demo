@@ -68,6 +68,12 @@ export class GameState {
     realmState: RealmManager.RealmState | null = null
     farmPlotsState: any[] = []
     farmPlotWheat: (any | null)[] = new Array(9).fill(null)
+    pondsState: any[] = []
+    pondIndicators: any[] = []
+
+    // UI Managers
+    farmingUI: any = null
+    fishingUI: any = null
 
     // Realm waiting
     isWaitingForRealm: boolean = false
@@ -139,6 +145,8 @@ export class GameState {
         handleShoot?: () => void
         handleSpawnDragon?: () => void
         checkVersion?: () => Promise<void>
+        updatePondIndicators?: () => void
+        startFarmingAction?: (type: 'planting' | 'watering' | 'harvesting', plotId: number) => void
     } = {}
 
     constructor() {

@@ -58,7 +58,9 @@ export class EntityManager {
                 mixer,
                 actions,
                 isDead: false,
-                weapon: data.weapon || null
+                weapon: data.weapon || null,
+                role: data.role || null,
+                heldItem: data.heldItem || null
             }
             this.state.players.set(data.id, playerData)
             this.updatePlayerWeapon(playerData, data.weapon || null)
@@ -73,7 +75,8 @@ export class EntityManager {
             playerData.actingPlotId = data.actionPlotId
         }
 
-        // Update display name if changed
+
+        // Update display name if changed OR if role changed
         const currentDisplayName = (playerData.username && playerData.username.trim() !== '')
             ? playerData.username
             : (playerData.firstName || 'Player')
@@ -81,11 +84,21 @@ export class EntityManager {
             ? ((data.username && data.username.trim() !== '') ? data.username : (data.firstName || playerData.firstName))
             : ((data.firstName && data.firstName !== playerData.firstName) ? data.firstName : currentDisplayName)
 
-        if (newDisplayName !== currentDisplayName) {
+        const roleChanged = data.role && data.role !== playerData.role
+
+        if (newDisplayName !== currentDisplayName || roleChanged) {
             this.state.scene.remove(playerData.label)
             playerData.firstName = data.firstName ?? playerData.firstName
             playerData.username = data.username !== undefined ? data.username : playerData.username
-            playerData.label = UIGenerators.createTextSprite(THREE, newDisplayName, isMe)
+
+            // Include role in label if present
+            let labelText = newDisplayName
+            const role = data.role || playerData.role
+            if (role && role !== 'None') {
+                labelText = `[${role}] ${newDisplayName}`
+            }
+
+            playerData.label = UIGenerators.createTextSprite(THREE, labelText, isMe)
             this.state.scene.add(playerData.label)
         }
 
@@ -106,6 +119,10 @@ export class EntityManager {
             playerData.faceIndex = newFace
             this.updatePlayerWeapon(playerData, playerData.weapon)
         }
+
+        // Update role and heldItem
+        if (data.role !== undefined) playerData.role = data.role
+        if (data.heldItem !== undefined) playerData.heldItem = data.heldItem
 
         // Update weapon if changed
         const weaponChanged = playerData.weapon !== (data.weapon || null)
@@ -474,11 +491,26 @@ export class EntityManager {
             while (rotDiff < -Math.PI) rotDiff += Math.PI * 2
             sheep.currentRotation += rotDiff * lerpFactor
 
-            sheep.mesh.position.set(sheep.currentX, 0, sheep.currentZ)
+            // Hopping animation
+            let hopY = 0
+            if (sheep.isHopping) {
+                sheep.hopPhase += deltaTime * 7.5
+                hopY = Math.abs(Math.sin(sheep.hopPhase)) * 0.4
+            } else {
+                if (sheep.hopPhase % Math.PI > 0.1) {
+                    sheep.hopPhase += deltaTime * 7.5
+                    hopY = Math.abs(Math.sin(sheep.hopPhase)) * 0.4
+                } else {
+                    sheep.hopPhase = 0
+                }
+            }
+            if (sheep.hopPhase > Math.PI * 2) sheep.hopPhase -= Math.PI * 2
+
+            sheep.mesh.position.set(sheep.currentX, hopY, sheep.currentZ)
             sheep.mesh.rotation.y = sheep.currentRotation
 
             if (sheep.label) {
-                sheep.label.position.set(sheep.currentX, 1.5, sheep.currentZ)
+                sheep.label.position.set(sheep.currentX, hopY + 1.5, sheep.currentZ)
             }
         })
     }
