@@ -167,6 +167,9 @@ export class MessageHandler {
                 this.gameRoom.realmManager.leaveLobby(playerId)
             } else if (data.type === 'realm_ready') {
                 this.gameRoom.realmManager.handleReady(playerId)
+            } else if (data.type === 'end_realm') {
+                // Triggered by button in UI
+                this.gameRoom.realmManager.endRealm()
             } else if (data.type === 'get_player_realm') {
                 // Query if this player has an active realm session
                 // Load fresh from storage to avoid race condition
@@ -201,6 +204,11 @@ export class MessageHandler {
                 this.gameRoom.realmGameManager.startFishing(playerId)
             } else if (data.type === 'pass_fish') {
                 this.gameRoom.realmGameManager.passFish(playerId)
+            } else if (data.type === 'end_realm') {
+                // Player wants to manually end the realm
+                if (this.gameRoom.realmManager.isRealm) {
+                    this.gameRoom.realmManager.endRealm()
+                }
             }
         } catch (err: unknown) { console.error('Error parsing message', err) }
     }

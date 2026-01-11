@@ -101,6 +101,39 @@ export class PlayerManager {
         // Realm Init Logic - BEFORE welcome message - MUST await to ensure playerRealmMap is loaded
         await this.gameRoom.realmManager.ensureInitialized(room || 'global-room')
 
+        // Check if this realm is valid (has config and hasn't expired)
+        const isRealm = (room && room !== 'global-room')
+        if (isRealm) {
+            const now = Date.now()
+            const realmExpired = this.gameRoom.realmManager.realmExpiresAt === 0 || now > this.gameRoom.realmManager.realmExpiresAt
+            const playerHasRole = this.gameRoom.realmManager.assignedRoles.has(id)
+
+            if (realmExpired || !playerHasRole) {
+                console.warn('[PlayerManager] Rejecting connection to invalid/expired realm:', {
+                    room,
+                    realmExpired,
+                    playerHasRole,
+                    expiresAt: this.gameRoom.realmManager.realmExpiresAt
+                })
+
+                // Clear the stale player realm mapping from global room
+                const globalId = this.gameRoom.env.GAMEROOM_NAMESPACE.idFromName('global-room')
+                const globalStub = this.gameRoom.env.GAMEROOM_NAMESPACE.get(globalId)
+                globalStub.fetch(`http://internal/internal/clear-player-realm?playerId=${id}`).catch(err => {
+                    console.error('[PlayerManager] Failed to clear player realm mapping:', err)
+                })
+
+                // Send error message and close connection
+                server.send(JSON.stringify({
+                    type: 'error',
+                    code: 'REALM_INVALID',
+                    message: 'This realm has expired or is no longer valid'
+                }))
+                server.close(1000, 'Realm invalid')
+                return new Response(null, { status: 101, webSocket: client })
+            }
+        }
+
         // Randomize player spawn location in realm ONLY if no saved position exists AND not in memory
         if (room && room !== 'global-room' && !savedLoc && !this.players.has(id)) {
             const spawnRadius = 20 // Spawn within 20 units
@@ -171,7 +204,7 @@ export class PlayerManager {
             }
         }
 
-        const isRealm = (room && room !== 'global-room')
+        // isRealm already declared earlier in this function
 
         server.send(JSON.stringify({
             type: 'welcome',

@@ -74,12 +74,17 @@ export class GameRoomDurableObject implements DurableObject {
             // Update PlayerManager with roles (pre-seeding)
             if (data.roles) {
                 for (const p of data.roles) {
-                    // We store these 'pending roles' in RealmManager or pre-seed PlayerManager?
-                    // PlayerManager usually manages active connections.
-                    // But we can store a map of "expected roles" in RealmManager
                     this.realmManager.assignedRoles.set(p.playerId, p.role)
                 }
             }
+
+            // Persist realm config to storage so it survives worker restarts
+            await this.state.storage.put('realm_config', {
+                expiresAt: data.expiresAt,
+                roles: data.roles || []
+            })
+            console.log('[REALM-DO] Saved realm config to storage')
+
             return new Response('OK')
         }
         if (url.pathname === '/internal/stats') {
@@ -159,6 +164,45 @@ export class GameRoomDurableObject implements DurableObject {
             console.log('[GLOBAL-ROOM] Player realm map saved to storage')
 
             return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } })
+        }
+
+        if (url.pathname === '/internal/clear-player-realm') {
+            // Clear a player's realm mapping (used when realm is invalid)
+            const playerId = url.searchParams.get('playerId')
+
+            if (!playerId) {
+                return new Response(JSON.stringify({ error: 'playerId required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+            }
+
+            await this.realmManager.ensureInitialized('global-room')
+            if (this.realmManager.playerRealmMap.has(playerId)) {
+                console.log('[GLOBAL-ROOM] Clearing stale realm mapping for player:', playerId)
+                this.realmManager.playerRealmMap.delete(playerId)
+                await this.realmManager.savePlayerRealms()
+            }
+
+            return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } })
+        }
+
+        if (url.pathname === '/internal/clear-realm-players') {
+            // Clear multiple players' realm mappings (used when realm manually destroyed)
+            try {
+                const body = await request.json() as { playerIds: string[] }
+                await this.realmManager.ensureInitialized('global-room')
+
+                for (const playerId of body.playerIds) {
+                    if (this.realmManager.playerRealmMap.has(playerId)) {
+                        this.realmManager.playerRealmMap.delete(playerId)
+                    }
+                }
+                await this.realmManager.savePlayerRealms()
+                console.log('[GLOBAL-ROOM] Cleared realm mappings for', body.playerIds.length, 'players')
+
+                return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } })
+            } catch (e) {
+                console.error('[GLOBAL-ROOM] Error clearing realm players:', e)
+                return new Response(JSON.stringify({ error: 'Failed to clear' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+            }
         }
 
         if (request.headers.get('Upgrade') !== 'websocket') {

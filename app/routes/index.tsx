@@ -92,6 +92,9 @@ export default createRoute(async (c) => {
                     <button id="inventory-btn" class="hud-btn">
                         <img src="/static/icon_inventory.png" class="hud-icon" alt="Inventory" />
                     </button>
+                    <button id="exit-realm-btn" style="display: none; background: rgba(239, 68, 68, 0.9); border: 2px solid #000; padding: 8px 16px; border-radius: 12px; color: white; font-weight: bold; font-size: 14px; cursor: pointer; font-family: 'Outfit', 'Inter', system-ui, sans-serif; transition: transform 0.1s, filter 0.1s; box-shadow: 0 2px 4px rgba(0,0,0,0.2); white-space: nowrap;">
+                        Exit Realm
+                    </button>
                 </div>
             </div>
             <GameCanvas

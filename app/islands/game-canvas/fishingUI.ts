@@ -126,30 +126,43 @@ export class FishingUI {
                 cookerArm.rotation.z = Math.PI / 6 // Extend outward (opposite direction)
             }
 
-            // 3. Camera Side View - position perpendicular to the line between players
+            // 3. Camera Side View - consistent with Fishing view (centered on ME or interaction)
+            // User requested "same side view as the one we are fixing for fishing".
+            // The fishing view is: 6.5 dist, 2.2 height, perpendicular.
+
+            const camDistance = 6.5
+            const camHeight = 2.2
+
+            // Vector from Cooker to Fisher (or vice versa)
+            let dirX = fisher.currentX - cooker.currentX
+            let dirZ = fisher.currentZ - cooker.currentZ
+            const distBetweenPlayers = Math.hypot(dirX, dirZ)
+
+            // Normalize direction vector
+            if (distBetweenPlayers > 0.001) {
+                dirX /= distBetweenPlayers
+                dirZ /= distBetweenPlayers
+            } else {
+                dirX = 0
+                dirZ = 1
+            }
+
+            // Perpendicular (Side) vector: (-z, x) corresponds to -90 deg rotation (Right side)
+            // We want a consistent side view.
+            const sideX = -dirZ
+            const sideZ = dirX
+
+            // Calculate midpoint
             const midX = (fisher.currentX + cooker.currentX) / 2
             const midZ = (fisher.currentZ + cooker.currentZ) / 2
 
-            const dx = fisher.currentX - cooker.currentX
-            const dz = fisher.currentZ - cooker.currentZ
-            const distBetweenPlayers = Math.hypot(dx, dz)
-
-            // Perpendicular vector - try both directions and pick one consistently
-            // Use the direction that keeps camera south/west of midpoint for consistency
-            let pX = distBetweenPlayers > 0 ? -dz / distBetweenPlayers : 1
-            let pZ = distBetweenPlayers > 0 ? dx / distBetweenPlayers : 0
-
-            // Camera distance based on how far apart players are, minimum 3.5 units
-            // User requested closer view
-            const cameraDistance = Math.max(3.5, distBetweenPlayers * 0.8 + 2)
-
-            // Position camera perpendicular to the line between players
-            const camX = midX + pX * cameraDistance
-            const camZ = midZ + pZ * cameraDistance
+            // Position camera at midpoint + side offset * distance
+            const camX = midX + sideX * camDistance
+            const camZ = midZ + sideZ * camDistance
 
             // Set camera position and look at midpoint between players
-            this.config.camera.position.set(camX, 2.5, camZ)
-            this.config.camera.lookAt(midX, 1.5, midZ)
+            this.config.camera.position.set(camX, camHeight, camZ)
+            this.config.camera.lookAt(midX, 1.2, midZ)
 
             // 4. Restore after duration
             setTimeout(() => {

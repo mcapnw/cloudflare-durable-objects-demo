@@ -128,6 +128,10 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     `
     document.body.appendChild(interactBtn)
 
+    // Restore reference to the server-rendered/JSX-rendered exit button
+    // It's defined in routes/index.tsx but we need to control it here
+    const exitRealmBtn = document.getElementById('exit-realm-btn')
+
     // Initialize Farming UI
     const farmingUI = new FarmingUI({
         interactBtn,
@@ -582,6 +586,19 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 updateEconomicUI()
             } else if (data.type === 'farm_update') {
                 updateFarmPlots(data.farmPlots)
+            } else if (data.type === 'error' && data.code === 'REALM_INVALID') {
+                // The realm we tried to join is invalid/expired
+                console.warn('[WS] Realm invalid, returning to lobby:', data.message)
+                currentRoomId = null
+                isInRealm = false
+                currentMode = 'game'
+                updateUIVisibility()
+                // Reconnect to global room
+                if (ws) ws.close()
+                ws = null
+                wsConnected = false
+                setTimeout(() => connectWebSocket(true), 100)
+                return
             } else if (data.type === 'welcome') {
                 if (data.activeRealm) {
                     console.log('Active realm found, redirecting...', data.activeRealm)
@@ -821,11 +838,24 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             } else if (data.type === 'pass_fish_complete') {
                 // Handled by state update
             } else if (data.type === 'fishing_complete') {
-                if (myPlayerId && data.playerId === myPlayerId) {
-                    const me = players.get(myPlayerId)
-                    if (me) {
-                        me.isActing = false
-                        me.actionType = null
+                const playerData = players.get(data.id)
+                if (playerData) {
+                    playerData.isActing = false
+                    playerData.actionType = null
+
+                    // For local player, also force animation reset to idle_noweapon
+                    if (myPlayerId && data.id === myPlayerId) {
+                        // Force immediate transition to idle_noweapon
+                        const idleAction = playerData.actions['idle_noweapon'] ||
+                            playerData.actions['Idle'] ||
+                            playerData.actions['idle']
+                        if (idleAction) {
+                            // Stop all other animations
+                            Object.values(playerData.actions).forEach((act: any) => {
+                                if (act !== idleAction) act.fadeOut(0.2)
+                            })
+                            idleAction.reset().fadeIn(0.2).play()
+                        }
                     }
                 }
             }
@@ -1026,7 +1056,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         // Logic for Custom Meshes (Weapons, Pole, Fish)
         let meshToCreate: any = null
 
-        // Toggle embedded fishing rod visibility
+        // Toggle embedded fishing rod visibility and setup animations
         let showFishingRod = false
         if (playerData.role === 'Fisher' && !playerData.heldItem) {
             showFishingRod = true
@@ -1039,8 +1069,38 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             if (child.name && (child.name.toLowerCase() === 'fishing rod' || child.name.toLowerCase() === 'fishing_rod')) {
                 child.visible = showFishingRod
                 if (showFishingRod) child.frustumCulled = false
+
+                // Initialize fishing rod animation mixer if not already done
+                // Initialize fishing rod - add animations to MAIN mixer actions (shared with character)
+                // This prevents transformation conflicts by using a single mixer for the hierarchy
+                if (showFishingRod && !playerData.fishingRodMesh) {
+                    playerData.fishingRodMesh = child
+
+                    if (MeshFactories.baseAnimations && playerData.mixer) {
+                        MeshFactories.baseAnimations.forEach((clip: any) => {
+                            // Only add fishing rod specific animations
+                            if (clip.name.toLowerCase().includes('fishingpole')) {
+                                // Add to MAIN actions list
+                                if (!playerData.actions[clip.name]) {
+                                    const action = playerData.mixer.clipAction(clip)
+                                    playerData.actions[clip.name] = action
+                                }
+                                // Also populate fishingRodActions for reference if needed, but they point to main mixer actions
+                                if (!playerData.fishingRodActions) playerData.fishingRodActions = {}
+                                playerData.fishingRodActions[clip.name] = playerData.actions[clip.name]
+                            }
+                        })
+                    }
+                }
+
+                // Clear fishing rod reference if hiding
+                if (!showFishingRod && playerData.fishingRodMesh) {
+                    playerData.fishingRodActions = {}
+                    playerData.fishingRodMesh = null
+                }
             }
         })
+
 
         if (playerData.role === 'Fisher') {
             if (playerData.heldItem === 'fish') {
@@ -2805,12 +2865,21 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         playerData.mixer.update(delta)
                         let activeAction: any = null
                         if (playerData.isActing) {
-                            activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
-
                             // Check for fishing action
                             if (playerData.actionType === 'fishing') {
-                                // Try 'fishing', 'Fishing', 'Casting', etc.
-                                activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || activeAction
+                                // Default to IDLE if fishing animation is missing, NOT Interact/CharacterSelection
+                                activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || playerData.actions['idle'] || playerData.actions['Idle']
+
+                                // ALSO play fishing rod animation simultaneously (main mixer)
+                                const rodAction = playerData.actions['fishingpole_fishing'] || playerData.actions['Fishingpole_fishing']
+                                if (rodAction && !rodAction.isRunning()) {
+                                    rodAction.setLoop(THREE.LoopOnce, 1)
+                                    rodAction.clampWhenFinished = true
+                                    rodAction.reset().play()
+                                }
+                            } else {
+                                // Normal interaction fallback
+                                activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
                             }
 
                             playerData.mixer.timeScale = 0.5
@@ -2818,11 +2887,16 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                             const run = playerData.actions['Run'] || playerData.actions['run']
                             const walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
 
-                            // Check if player has the staff_beginner weapon
-                            const hasStaffBeginner = playerData.weapon === 'staff_beginner'
-                            const idle = hasStaffBeginner
-                                ? (playerData.actions['Idle'] || playerData.actions['idle'])
-                                : (playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle'])
+                            // All players use idle_noweapon (staff is hidden in realm, and default is idle_noweapon)
+                            // Use explicit weapon check for idle state
+                            let idle = null
+                            if (playerData.weapon === 'staff_beginner') {
+                                idle = playerData.actions['idle'] || playerData.actions['Idle']
+                            }
+                            // Fallback or no weapon
+                            if (!idle) {
+                                idle = playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle']
+                            }
 
                             activeAction = (isMoving && (walk || run)) ? (walk || run) : idle
                             playerData.mixer.timeScale = 1.0
@@ -2835,24 +2909,27 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                                 activeAction.reset().fadeIn(0.2).play()
                             }
                         }
+
+
                     }
-                    // Only skip farming tool update if player has realm role (Fisher/Cooker handle their own tools)
-                    const hasRealmRole = playerData.role && playerData.role !== 'None'
-                    if (!hasRealmRole) {
-                        farmingUI.updateToolMeshForPlayer(playerData, THREE)
-                    }
-                    // Only float/spin weapon if NOT attached to a bone (fallback case)
-                    // Check for bone names that exist in this model: hands, leftHand
-                    const hasHandBone = playerData.mesh.getObjectByName('hands') ||
-                        playerData.mesh.getObjectByName('leftHand') ||
-                        playerData.mesh.getObjectByName('hand_R')
-                    if (playerData.weaponMesh && !hasHandBone) {
-                        playerData.weaponMesh.rotation.y += 0.02
-                        playerData.weaponMesh.position.y = 2.0 + Math.sin(now * 0.003) * 0.1
-                    }
+                }
+                // Only skip farming tool update if player has realm role (Fisher/Cooker handle their own tools)
+                const hasRealmRole = playerData.role && playerData.role !== 'None'
+                if (!hasRealmRole) {
+                    farmingUI.updateToolMeshForPlayer(playerData, THREE)
+                }
+                // Only float/spin weapon if NOT attached to a bone (fallback case)
+                // Check for bone names that exist in this model: hands, leftHand
+                const hasHandBone = playerData.mesh.getObjectByName('hands') ||
+                    playerData.mesh.getObjectByName('leftHand') ||
+                    playerData.mesh.getObjectByName('hand_R')
+                if (playerData.weaponMesh && !hasHandBone) {
+                    playerData.weaponMesh.rotation.y += 0.02
+                    playerData.weaponMesh.position.y = 2.0 + Math.sin(now * 0.003) * 0.1
                 }
             }
         }
+
 
         if (myPlayerId && !myIsDead) {
             const playerData = players.get(myPlayerId)
@@ -2860,11 +2937,21 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 playerData.mixer.update(delta)
                 let activeAction: any = null
                 if (playerData.isActing) {
-                    activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
-
                     // Check for fishing action
                     if (playerData.actionType === 'fishing') {
-                        activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || activeAction
+                        // Default to IDLE if fishing animation is missing, NOT Interact/CharacterSelection
+                        activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || playerData.actions['idle'] || playerData.actions['Idle']
+
+                        // ALSO play fishing rod animation simultaneously (main mixer)
+                        const rodAction = playerData.actions['fishingpole_fishing'] || playerData.actions['Fishingpole_fishing']
+                        if (rodAction && !rodAction.isRunning()) {
+                            rodAction.setLoop(THREE.LoopOnce, 1)
+                            rodAction.clampWhenFinished = true
+                            rodAction.reset().play()
+                        }
+                    } else {
+                        // Normal interaction fallback
+                        activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
                     }
 
                     playerData.mixer.timeScale = 0.5
@@ -2872,11 +2959,16 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     const run = playerData.actions['Run'] || playerData.actions['run']
                     const walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
 
-                    // Check if player has the staff_beginner weapon
-                    const hasStaffBeginner = playerData.weapon === 'staff_beginner'
-                    const idle = hasStaffBeginner
-                        ? (playerData.actions['Idle'] || playerData.actions['idle'])
-                        : (playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle'])
+                    // All players use idle_noweapon (staff is hidden in realm, and default is idle_noweapon)
+                    // Use explicit weapon check for idle state
+                    let idle = null
+                    if (playerData.weapon === 'staff_beginner') {
+                        idle = playerData.actions['idle'] || playerData.actions['Idle']
+                    }
+                    // Fallback or no weapon
+                    if (!idle) {
+                        idle = playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle']
+                    }
 
                     activeAction = (hasInput && (walk || run)) ? (walk || run) : idle
                     playerData.mixer.timeScale = 1.0
@@ -2889,6 +2981,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         activeAction.reset().fadeIn(0.2).play()
                     }
                 }
+
+
             }
             if (playerData) {
                 // Only update farming tool for non-realm players
@@ -2948,6 +3042,19 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         ws.send(JSON.stringify({ type: 'join_realm_lobby' }))
                     }
                 }
+            } else if (isInRealm && exitRealmBtn) {
+                // Show Exit Realm button if we are in a realm
+                exitRealmBtn.style.display = 'block'
+                exitRealmBtn.onclick = () => {
+                    if (confirm('Are you sure you want to exit the realm? This will destroy the instance.')) {
+                        if (wsConnected && ws) {
+                            ws.send(JSON.stringify({ type: 'end_realm' }))
+                        }
+                    }
+                }
+                // Hide interact button if only exit is needed, or allow both?
+                // Typically exit overrides join
+                if (!nearShop && !nearPanel) interactBtn.style.display = 'none'
             } else {
                 // Check Fishing First (Realm)
                 let handled = false
@@ -2985,9 +3092,12 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             } else {
                 spawnBtn.style.display = 'none'
             }
+            // Ensure exit button is hidden if not in realm or not eligible
+            if (exitRealmBtn && !isInRealm) exitRealmBtn.style.display = 'none'
         } else if (!localPlayer?.isActing) {
             interactBtn.style.display = 'none'
             spawnBtn.style.display = 'none'
+            if (exitRealmBtn) exitRealmBtn.style.display = 'none'
         }
 
         if (hasInput && currentMode === 'game') {
@@ -3127,36 +3237,17 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
                 if (!isFishingAnimationLocked) {
                     if (playerData && playerData.isActing && playerData.actionType === 'fishing') {
-                        // Fishing Side View: Camera to the side of the player, facing them
-                        // Find the active pond to position camera looking toward it
-                        const activePond = pondsState.find(p => p.active)
-                        const camDistance = 4.0
-                        const camHeight = 1.8
+                        // Fishing Side View: Camera to the side of the player, centered on player
+                        const camDistance = 6.5
+                        const camHeight = 2.2
 
-                        if (activePond) {
-                            // Position camera perpendicular to player-pond line
-                            const dx = activePond.x - myX
-                            const dz = activePond.z - myZ
-                            const len = Math.hypot(dx, dz)
-                            // Perpendicular vector
-                            const perpX = len > 0 ? -dz / len : 1
-                            const perpZ = len > 0 ? dx / len : 0
+                        // Strict side view based on player rotation (Right side view)
+                        const sideAngle = myRotation - Math.PI / 2
+                        const camX = myX + Math.sin(sideAngle) * camDistance
+                        const camZ = myZ + Math.cos(sideAngle) * camDistance
 
-                            const camX = myX + perpX * camDistance
-                            const camZ = myZ + perpZ * camDistance
-                            camera.position.set(camX, camHeight, camZ)
-                            // Look at point between player and pond
-                            const midX = (myX + activePond.x) / 2
-                            const midZ = (myZ + activePond.z) / 2
-                            camera.lookAt(midX, 1.2, midZ)
-                        } else {
-                            // Fallback: side view of player
-                            const sideAngle = myRotation + Math.PI / 2
-                            const camX = myX + Math.sin(sideAngle) * camDistance
-                            const camZ = myZ + Math.cos(sideAngle) * camDistance
-                            camera.position.set(camX, camHeight, camZ)
-                            camera.lookAt(myX, 1.2, myZ)
-                        }
+                        camera.position.set(camX, camHeight, camZ)
+                        camera.lookAt(myX, 1.2, myZ)
                     } else if (playerData && playerData.isActing) {
                         // Farming View: Closer to a front view but still slightly off to the side
                         const camDistance = 3.5

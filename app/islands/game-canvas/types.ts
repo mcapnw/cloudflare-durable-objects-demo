@@ -46,6 +46,10 @@ export interface PlayerData {
     actingPlotId?: number | null
     actingStartTime?: number
     temporaryToolMesh?: any
+    // Fishing Rod Animation
+    fishingRodMesh?: any
+    fishingRodMixer?: any
+    fishingRodActions?: { [key: string]: any }
 }
 
 export interface PickupData {

@@ -22,11 +22,25 @@ export class RealmManager {
 
         if (room && room !== 'global-room') {
             this.isRealm = true
-            // If realmExpiresAt is 0, it means we haven't received init-realm yet
-            // We set a default of 5 minutes just in case, or wait?
-            // Better to default to 5 minutes to match user expectation if init fails
+
+            // Try to load realm config from storage (in case worker restarted)
+            try {
+                const config = await this.gameRoom.state.storage.get<{ expiresAt: number, roles: { playerId: string, role: PlayerRole }[] }>('realm_config')
+                if (config) {
+                    console.log('[REALM-DO] Loaded realm config from storage:', config)
+                    this.realmExpiresAt = config.expiresAt
+                    for (const r of config.roles) {
+                        this.assignedRoles.set(r.playerId, r.role)
+                    }
+                }
+            } catch (e) {
+                console.error('[REALM-DO] Failed to load realm config:', e)
+            }
+
+            // If realmExpiresAt is still 0, the realm was never properly initialized
             if (this.realmExpiresAt === 0) {
-                this.realmExpiresAt = Date.now() + 60000 // 1 minute
+                console.warn('[REALM-DO] Realm has no config - likely expired or invalid')
+                // Leave realmExpiresAt as 0 to signal invalid state
             }
             await this.loadActiveRealmsCount()
         } else {
@@ -256,5 +270,32 @@ export class RealmManager {
             type: 'realm_lobby_update',
             players: Array.from(this.waitingPlayers.values())
         })
+    }
+
+    endRealm() {
+        // Manually end the realm (triggered by player action)
+        if (!this.isRealm) return
+
+        console.log('[REALM] Manually ending realm')
+
+        // Get list of players before clearing
+        const playerIds = Array.from(this.gameRoom.playerManager.players.keys())
+
+        // Broadcast to all players
+        this.gameRoom.broadcast({ type: 'realm_expired' })
+
+        // Clear player mappings in global room
+        const globalId = this.gameRoom.env.GAMEROOM_NAMESPACE.idFromName('global-room')
+        const globalStub = this.gameRoom.env.GAMEROOM_NAMESPACE.get(globalId)
+
+        // Notify global room to clear these players from realm mapping
+        globalStub.fetch('http://internal/internal/clear-realm-players', {
+            method: 'POST',
+            body: JSON.stringify({ playerIds })
+        }).catch(e => console.error('Failed to clear realm players:', e))
+
+        // Clear local state
+        this.gameRoom.playerManager.players.clear()
+        this.gameRoom.stopGameLoop()
     }
 }
