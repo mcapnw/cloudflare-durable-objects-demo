@@ -1085,12 +1085,13 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                                     const action = playerData.mixer.clipAction(clip)
                                     playerData.actions[clip.name] = action
                                 }
-                                // Also populate fishingRodActions for reference if needed, but they point to main mixer actions
+                                // Also populate fishingRodActions for reference if needed
                                 if (!playerData.fishingRodActions) playerData.fishingRodActions = {}
                                 playerData.fishingRodActions[clip.name] = playerData.actions[clip.name]
                             }
                         })
                     }
+
                 }
 
                 // Clear fishing rod reference if hiding
@@ -2889,13 +2890,24 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
                             // All players use idle_noweapon (staff is hidden in realm, and default is idle_noweapon)
                             // Use explicit weapon check for idle state
+                            // REALM FIX: If valid role, force idle_noweapon (hide staff)
+                            const hasRealmRole = playerData.role && playerData.role !== 'None'
+
                             let idle = null
-                            if (playerData.weapon === 'staff_beginner') {
+                            if (playerData.weapon === 'staff_beginner' && !hasRealmRole) {
                                 idle = playerData.actions['idle'] || playerData.actions['Idle']
                             }
-                            // Fallback or no weapon
+                            // Fallback or no weapon or has role
                             if (!idle) {
                                 idle = playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle']
+                            }
+
+                            // FISHING POLE IDLE: If holding rod but not fishing, play fishingpole_idle
+                            if (playerData.fishingRodMesh && playerData.fishingRodMesh.visible && !playerData.isActing) {
+                                const rodIdle = playerData.actions['fishingpole_idle'] || playerData.actions['Fishingpole_idle']
+                                if (rodIdle && !rodIdle.isRunning()) {
+                                    rodIdle.reset().play()
+                                }
                             }
 
                             activeAction = (isMoving && (walk || run)) ? (walk || run) : idle
@@ -2961,13 +2973,24 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
                     // All players use idle_noweapon (staff is hidden in realm, and default is idle_noweapon)
                     // Use explicit weapon check for idle state
+                    // REALM FIX: If valid role, force idle_noweapon (hide staff)
+                    const hasRealmRole = playerData.role && playerData.role !== 'None'
+
                     let idle = null
-                    if (playerData.weapon === 'staff_beginner') {
+                    if (playerData.weapon === 'staff_beginner' && !hasRealmRole) {
                         idle = playerData.actions['idle'] || playerData.actions['Idle']
                     }
-                    // Fallback or no weapon
+                    // Fallback or no weapon or has role
                     if (!idle) {
                         idle = playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle']
+                    }
+
+                    // FISHING POLE IDLE: If holding rod but not fishing, play fishingpole_idle
+                    if (playerData.fishingRodMesh && playerData.fishingRodMesh.visible && !playerData.isActing) {
+                        const rodIdle = playerData.actions['fishingpole_idle'] || playerData.actions['Fishingpole_idle']
+                        if (rodIdle && !rodIdle.isRunning()) {
+                            rodIdle.reset().play()
+                        }
                     }
 
                     activeAction = (hasInput && (walk || run)) ? (walk || run) : idle

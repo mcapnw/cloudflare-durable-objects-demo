@@ -7,7 +7,7 @@ export default createRoute((c) => {
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0f0f23" />
+    <meta name="theme-color" content="#87CEEB" />
     <title>Sign In - Antigravity</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@500&display=swap" rel="stylesheet">
     <style>
@@ -23,15 +23,19 @@ export default createRoute((c) => {
             margin: 0;
             overflow: hidden; /* Prevent scrolling */
             display: flex;
-            align-items: center;
+            align-items: flex-end; /* Position content at bottom */
             justify-content: center;
-            background: linear-gradient(135deg, #0f0f23 0%, #1a1a3e 50%, #0d1b2a 100%);
+            background: url('/static/login_background.png') no-repeat center center fixed;
+            background-size: cover;
             font-family: 'Roboto', system-ui, -apple-system, sans-serif;
             touch-action: none; /* Prevent scroll chaining */
         }
         .login-container {
             text-align: center;
-            padding: 40px;
+            padding: 0 20px 60px 20px; /* Add bottom padding to lift button slightly */
+            width: 100%;
+            display: flex;
+            justify-content: center;
         }
         /* Google Sign-In Button - Official Branding (Dark) */
         .gsi-material-button {
@@ -42,38 +46,39 @@ export default createRoute((c) => {
             background-color: #131314;
             background-image: none;
             border: 1px solid #747775;
-            -webkit-border-radius: 4px;
-            border-radius: 4px;
+            -webkit-border-radius: 24px; /* Rounded pill shape looks better on mobile games */
+            border-radius: 24px;
             -webkit-box-sizing: border-box;
             box-sizing: border-box;
             color: #e3e3e3;
             cursor: pointer;
             font-family: 'Roboto', arial, sans-serif;
-            font-size: 14px;
-            height: 40px;
+            font-size: 16px; /* Slightly larger text */
+            height: 48px; /* Taller button for easier touch */
             letter-spacing: 0.25px;
             outline: none;
             overflow: hidden;
-            padding: 0 12px;
+            padding: 0 24px;
             position: relative;
             text-align: center;
             -webkit-transition: background-color .218s, border-color .218s, box-shadow .218s;
             transition: background-color .218s, border-color .218s, box-shadow .218s;
             vertical-align: middle;
             white-space: nowrap;
-            width: auto;
-            max-width: 400px;
+            width: 100%;
+            max-width: 300px;
             min-width: min-content;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         .gsi-material-button .gsi-material-button-icon {
-            height: 20px;
+            height: 24px; /* Larger icon */
             margin-right: 12px;
-            min-width: 20px;
-            width: 20px;
+            min-width: 24px;
+            width: 24px;
         }
         .gsi-material-button .gsi-material-button-content-wrapper {
             -webkit-align-items: center;
