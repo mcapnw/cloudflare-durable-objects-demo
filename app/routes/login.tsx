@@ -37,24 +37,24 @@ export default createRoute((c) => {
             display: flex;
             justify-content: center;
         }
-        /* Google Sign-In Button - Official Branding (Dark) */
+        /* Google Sign-In Button - Light Mode Branding */
         .gsi-material-button {
             -moz-user-select: none;
             -webkit-user-select: none;
             -ms-user-select: none;
             -webkit-appearance: none;
-            background-color: #131314;
+            background-color: #ffffff; /* White background */
             background-image: none;
-            border: 1px solid #747775;
-            -webkit-border-radius: 24px; /* Rounded pill shape looks better on mobile games */
+            border: 1px solid #747775; /* Gray border */
+            -webkit-border-radius: 24px;
             border-radius: 24px;
             -webkit-box-sizing: border-box;
             box-sizing: border-box;
-            color: #e3e3e3;
+            color: #1f1f1f; /* Dark text */
             cursor: pointer;
             font-family: 'Roboto', arial, sans-serif;
-            font-size: 16px; /* Slightly larger text */
-            height: 48px; /* Taller button for easier touch */
+            font-size: 16px;
+            height: 48px;
             letter-spacing: 0.25px;
             outline: none;
             overflow: hidden;
@@ -72,10 +72,10 @@ export default createRoute((c) => {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Lighter shadow */
         }
         .gsi-material-button .gsi-material-button-icon {
-            height: 24px; /* Larger icon */
+            height: 24px;
             margin-right: 12px;
             min-width: 24px;
             width: 24px;
@@ -114,15 +114,15 @@ export default createRoute((c) => {
         }
         .gsi-material-button:not(:disabled):active .gsi-material-button-state, 
         .gsi-material-button:not(:disabled):focus .gsi-material-button-state {
-            background-color: #fff;
+            background-color: #303030;
             opacity: 12%;
         }
         .gsi-material-button:not(:disabled):hover {
-            -webkit-box-shadow: 0 1px 2px 0 rgba(60, 64, 67, .30), 0 2px 6px 2px rgba(60, 64, 67, .15);
-            box-shadow: 0 1px 2px 0 rgba(60, 64, 67, .30), 0 2px 6px 2px rgba(60, 64, 67, .15);
+            box-shadow: 0 1px 2px 0 rgba(60, 64, 67, .30), 0 1px 3px 1px rgba(60, 64, 67, .15);
+            background-color: #f8f9fa; /* Slight grey on hover */
         }
         .gsi-material-button:not(:disabled):hover .gsi-material-button-state {
-            background-color: #fff;
+            background-color: #303030;
             opacity: 8%;
         }
     </style>

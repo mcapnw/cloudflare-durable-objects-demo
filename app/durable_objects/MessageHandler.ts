@@ -96,6 +96,12 @@ export class MessageHandler {
                     createdAt: now,
                     speed: speed
                 })
+
+                // Track shot in session analytics
+                const sessionData = this.gameRoom.playerManager.playerSessionData.get(playerId)
+                if (sessionData) {
+                    sessionData.shotsFired++
+                }
             } else if (data.type === 'get_scores') {
                 const scores = await this.gameRoom.env.DB.prepare('SELECT username, first_name, dragon_kills, deaths FROM Users ORDER BY dragon_kills DESC LIMIT 10').all()
                 ws.send(JSON.stringify({ type: 'scores', scores: scores.results }))
@@ -145,6 +151,12 @@ export class MessageHandler {
                             inv.push(itemId)
                             await this.gameRoom.env.DB.prepare('UPDATE Users SET coins = coins - ?, inventory = ? WHERE id = ?').bind(cost, JSON.stringify(inv), playerId).run()
                             ws.send(JSON.stringify({ type: 'buy_success', item: itemId, coins: user.coins - cost, inventory: inv }))
+
+                            // Track purchase in session analytics
+                            const sessionData = this.gameRoom.playerManager.playerSessionData.get(playerId)
+                            if (sessionData) {
+                                sessionData.itemsPurchased++
+                            }
                         } else {
                             ws.send(JSON.stringify({ type: 'error', message: 'Not enough coins' }))
                         }
@@ -162,6 +174,12 @@ export class MessageHandler {
                 const p = this.gameRoom.playerManager.getPlayerData(ws)
                 if (p) {
                     this.gameRoom.realmManager.joinLobby(p)
+
+                    // Track realm join in session analytics
+                    const sessionData = this.gameRoom.playerManager.playerSessionData.get(playerId)
+                    if (sessionData) {
+                        sessionData.realmJoins++
+                    }
                 }
             } else if (data.type === 'leave_realm_lobby') {
                 this.gameRoom.realmManager.leaveLobby(playerId)

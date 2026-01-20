@@ -156,6 +156,12 @@ export class DragonManager {
                 .bind(killerId)
                 .run()
                 .catch(e => console.error('Failed to update dragon kills:', e))
+
+            // Track dragon kill in session analytics
+            const sessionData = this.gameRoom.playerManager.playerSessionData.get(killerId)
+            if (sessionData) {
+                sessionData.dragonKills++
+            }
         }
 
         this.dragon.attackers.clear()

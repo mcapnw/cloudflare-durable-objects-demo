@@ -4,6 +4,18 @@ import { Player } from './game-logic/types'
 export class PlayerManager {
     players: Map<string, Player> = new Map() // Central source of truth for all players
     playerLastShoot: Map<string, number> = new Map() // Rate limiting for shoot action
+    playerSessionData: Map<string, {
+        sessionStart: number
+        coinsStart: number
+        plantsPlanted: number
+        plantsWatered: number
+        plantsHarvested: number
+        dragonKills: number
+        deaths: number
+        shotsFired: number
+        itemsPurchased: number
+        realmJoins: number
+    }> = new Map()
 
     constructor(private gameRoom: GameRoomDurableObject) { }
 
@@ -174,6 +186,32 @@ export class PlayerManager {
         this.players.set(id, playerData)
         this.setPlayerData(server, playerData)
 
+        // Initialize session tracking
+        let coinsStart = 0
+        try {
+            const coinsRow = await this.gameRoom.env.DB.prepare('SELECT coins FROM Users WHERE id = ?')
+                .bind(id)
+                .first<{ coins: number }>()
+            if (coinsRow) {
+                coinsStart = coinsRow.coins
+            }
+        } catch (e) {
+            console.error('[PlayerManager] Failed to fetch coins for session tracking:', e)
+        }
+
+        this.playerSessionData.set(id, {
+            sessionStart: Date.now(),
+            coinsStart,
+            plantsPlanted: 0,
+            plantsWatered: 0,
+            plantsHarvested: 0,
+            dragonKills: 0,
+            deaths: 0,
+            shotsFired: 0,
+            itemsPurchased: 0,
+            realmJoins: 0
+        })
+
         const dragon = this.gameRoom.dragonManager.dragon
         const dragonDamage = dragon.damageMap.get(id)
         if (dragonDamage) {
@@ -283,6 +321,62 @@ export class PlayerManager {
                         faceIndex: playerData.faceIndex,
                         weapon: playerData.weapon
                     })
+
+                    // Save session analytics to D1
+                    const sessionData = this.playerSessionData.get(playerId)
+                    if (sessionData) {
+                        const sessionEnd = Date.now()
+                        const durationSeconds = Math.floor((sessionEnd - sessionData.sessionStart) / 1000)
+
+                        // Get current coins to calculate earnings
+                        let coinsEnd = sessionData.coinsStart
+                        try {
+                            const coinsRow = await this.gameRoom.env.DB.prepare('SELECT coins FROM Users WHERE id = ?')
+                                .bind(playerId)
+                                .first<{ coins: number }>()
+                            if (coinsRow) {
+                                coinsEnd = coinsRow.coins
+                            }
+                        } catch (e) {
+                            console.error('[PlayerManager] Failed to fetch final coins for session:', e)
+                        }
+
+                        const coinsEarned = coinsEnd - sessionData.coinsStart
+
+                        try {
+                            await this.gameRoom.env.DB.prepare(`
+                                INSERT INTO PlayerSessions (
+                                    user_id, session_start, session_end, duration_seconds,
+                                    coins_start, coins_end, coins_earned,
+                                    plants_planted, plants_watered, plants_harvested,
+                                    dragon_kills, deaths, shots_fired,
+                                    items_purchased, realm_joins
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            `).bind(
+                                playerId,
+                                sessionData.sessionStart,
+                                sessionEnd,
+                                durationSeconds,
+                                sessionData.coinsStart,
+                                coinsEnd,
+                                coinsEarned,
+                                sessionData.plantsPlanted,
+                                sessionData.plantsWatered,
+                                sessionData.plantsHarvested,
+                                sessionData.dragonKills,
+                                sessionData.deaths,
+                                sessionData.shotsFired,
+                                sessionData.itemsPurchased,
+                                sessionData.realmJoins
+                            ).run()
+                            console.log('[PlayerManager] Saved session analytics for player:', playerId)
+                        } catch (e) {
+                            console.error('[PlayerManager] Failed to save session analytics:', e)
+                        }
+
+                        this.playerSessionData.delete(playerId)
+                    }
+
                     this.players.delete(playerId)
 
                     // If in Realm and only 1 player remains, make them Fisher
@@ -316,6 +410,12 @@ export class PlayerManager {
                     this.gameRoom.dragonManager.dragon.attackers.delete(playerId)
                     setTimeout(() => this.respawnPlayer(playerId), 10000)
                     this.gameRoom.env.DB.prepare('UPDATE Users SET deaths = deaths + 1 WHERE id = ?').bind(playerId).run().catch(e => console.error('Failed to update deaths:', e))
+
+                    // Track death in session analytics
+                    const sessionData = this.playerSessionData.get(playerId)
+                    if (sessionData) {
+                        sessionData.deaths++
+                    }
                 }
                 break
             }

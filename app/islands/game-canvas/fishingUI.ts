@@ -78,6 +78,41 @@ export class FishingUI {
         btn.onclick = onClick
     }
 
+    /**
+     * Show fishing in progress button - moves button to bottom and disables it
+     */
+    showFishingInProgress() {
+        const btn = this.config.interactBtn
+        btn.innerText = 'Fishing...'
+        btn.style.display = 'block'
+        btn.style.background = '#9CA3AF'
+        btn.style.color = 'white'
+        btn.style.border = '2px solid white'
+        btn.style.boxShadow = 'none'
+        btn.onclick = null
+
+        // Move button to bottom of screen for visibility during fishing
+        btn.style.top = 'auto'
+        btn.style.bottom = '100px'
+        btn.style.transform = 'translate(-50%, 0)'
+
+        // Hide joystick during fishing
+        this.config.setJoystickVisible(false)
+    }
+
+    /**
+     * Restore button position after fishing ends
+     */
+    restoreButtonPosition() {
+        const btn = this.config.interactBtn
+        btn.style.top = '50%'
+        btn.style.bottom = 'auto'
+        btn.style.transform = 'translate(-50%, calc(-50% - 60px))'
+
+        // Restore joystick 
+        this.config.setJoystickVisible(true)
+    }
+
     handlePassFishAnimation(
         fisherId: string,
         cookerId: string,

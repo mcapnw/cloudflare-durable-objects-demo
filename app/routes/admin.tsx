@@ -14,10 +14,30 @@ export default createRoute(async (c) => {
     }
 
     return c.render(
-        <div style="background: #121212; min-height: 100vh; color: #fff; font-family: sans-serif; padding: 20px;">
-            <h1 style="text-align: center; margin-bottom: 30px;">Admin Interface</h1>
-            <AdminPanel />
-        </div>,
+        <>
+            {/* Override global styles to enable scrolling on admin page */}
+            <style>{`
+                html, body {
+                    overflow: auto !important;
+                    overflow-y: scroll !important;
+                    position: static !important;
+                    height: auto !important;
+                    min-height: 100vh;
+                    touch-action: auto !important;
+                    user-select: auto !important;
+                    -webkit-user-select: auto !important;
+                    overscroll-behavior: auto !important;
+                    -webkit-overflow-scrolling: touch !important;
+                }
+                body {
+                    position: relative !important;
+                }
+            `}</style>
+            <div style="background: #121212; min-height: 100vh; color: #fff; font-family: sans-serif; padding: 20px;">
+                <h1 style="text-align: center; margin-bottom: 30px;">Admin Interface</h1>
+                <AdminPanel />
+            </div>
+        </>,
         { title: 'Antigravity - Admin' }
     )
 })

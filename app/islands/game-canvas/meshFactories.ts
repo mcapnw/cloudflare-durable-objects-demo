@@ -51,7 +51,7 @@ export function initFactories(_THREE: any, _SkeletonUtils: any) {
 }
 
 export function loadCharacterModel(loader: any, callback: () => void) {
-    loader.load('/static/character4.glb', (gltf: any) => {
+    loader.load('/static/character test3.glb', (gltf: any) => {
         baseCharModel = gltf.scene
         baseAnimations = gltf.animations
 

@@ -87,6 +87,12 @@ export class FarmManager {
                         this.gameRoom.state.storage.put('farm_plots', this.farmPlots)
                         this.gameRoom.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
                         ws.send(JSON.stringify({ type: 'inventory_update', inventory: inv }))
+
+                        // Track planting in session analytics
+                        const sessionData = this.gameRoom.playerManager.playerSessionData.get(playerId)
+                        if (sessionData) {
+                            sessionData.plantsPlanted++
+                        }
                     } else {
                         ws.send(JSON.stringify({ type: 'error', message: 'Need trowel and wheat seeds' }))
                     }
@@ -123,6 +129,12 @@ export class FarmManager {
                         plot.watered = true; plot.growthStage = 2; plot.wateredAt = Date.now()
                         this.gameRoom.state.storage.put('farm_plots', this.farmPlots)
                         this.gameRoom.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
+
+                        // Track watering in session analytics
+                        const sessionData = this.gameRoom.playerManager.playerSessionData.get(playerId)
+                        if (sessionData) {
+                            sessionData.plantsWatered++
+                        }
                     } else {
                         ws.send(JSON.stringify({ type: 'error', message: 'Need water can' }))
                     }
@@ -160,6 +172,12 @@ export class FarmManager {
                     this.gameRoom.state.storage.put('farm_plots', this.farmPlots)
                     this.gameRoom.broadcast({ type: 'farm_update', farmPlots: this.farmPlots })
                     ws.send(JSON.stringify({ type: 'inventory_update', inventory: inv }))
+
+                    // Track harvesting in session analytics
+                    const sessionData = this.gameRoom.playerManager.playerSessionData.get(playerId)
+                    if (sessionData) {
+                        sessionData.plantsHarvested++
+                    }
                 }
             } catch (e) { console.error('Harvest wheat error:', e) }
         }

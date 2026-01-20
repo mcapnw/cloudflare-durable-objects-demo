@@ -19,7 +19,33 @@ export const GET = createRoute(async (c) => {
         return c.text('User not found', 404)
     }
 
-    return c.json({ user: dbUser })
+    // Fetch user analytics stats
+    let userStats = null
+    try {
+        const statsQuery = `
+            SELECT 
+                COUNT(*) as total_sessions,
+                SUM(duration_seconds) as total_playtime,
+                SUM(dragon_kills) as total_dragon_kills,
+                SUM(coins_earned) as total_coins_earned,
+                SUM(deaths) as total_deaths
+            FROM SessionAnalytics 
+            WHERE user_id = ?
+        `
+        userStats = await db.prepare(statsQuery).bind(userId).first()
+    } catch (e) {
+        console.error('Failed to fetch user stats', e)
+        // Fallback if table doesn't exist
+        userStats = {
+            total_sessions: 0,
+            total_playtime: 0,
+            total_dragon_kills: 0,
+            total_coins_earned: 0,
+            total_deaths: 0
+        }
+    }
+
+    return c.json({ user: dbUser, stats: userStats })
 })
 
 const updateUserSchema = z.object({

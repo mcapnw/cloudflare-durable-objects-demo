@@ -20,3 +20,6 @@ class_name = "GameRoomDurableObject"
 tag = "v1"
 new_sqlite_classes = ["GameRoomDurableObject"]
 
+[triggers]
+crons = ["0 5 * * *", "*/5 * * * *"]
+

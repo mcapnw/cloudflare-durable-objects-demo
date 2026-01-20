@@ -7,8 +7,8 @@ export const app = createApp({
         app.use('*', async (c, next) => {
             const path = c.req.path
 
-            // Allow auth routes, login page, static assets, and favicon
-            if (path.startsWith('/auth') || path === '/login' || path.startsWith('/static') || path.startsWith('/app') || path === '/favicon.ico') {
+            // Allow news page, auth routes, login page, static assets, and favicon
+            if (path === '/news' || path.startsWith('/auth') || path === '/login' || path.startsWith('/static') || path.startsWith('/app') || path === '/favicon.ico') {
                 await next()
                 return
             }

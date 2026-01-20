@@ -845,6 +845,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
 
                     // For local player, also force animation reset to idle_noweapon
                     if (myPlayerId && data.id === myPlayerId) {
+                        // Restore fishing button position
+                        fishingUI?.restoreButtonPosition()
+
                         // Force immediate transition to idle_noweapon
                         const idleAction = playerData.actions['idle_noweapon'] ||
                             playerData.actions['Idle'] ||
@@ -1069,36 +1072,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             if (child.name && (child.name.toLowerCase() === 'fishing rod' || child.name.toLowerCase() === 'fishing_rod')) {
                 child.visible = showFishingRod
                 if (showFishingRod) child.frustumCulled = false
-
-                // Initialize fishing rod animation mixer if not already done
-                // Initialize fishing rod - add animations to MAIN mixer actions (shared with character)
-                // This prevents transformation conflicts by using a single mixer for the hierarchy
-                if (showFishingRod && !playerData.fishingRodMesh) {
-                    playerData.fishingRodMesh = child
-
-                    if (MeshFactories.baseAnimations && playerData.mixer) {
-                        MeshFactories.baseAnimations.forEach((clip: any) => {
-                            // Only add fishing rod specific animations
-                            if (clip.name.toLowerCase().includes('fishingpole')) {
-                                // Add to MAIN actions list
-                                if (!playerData.actions[clip.name]) {
-                                    const action = playerData.mixer.clipAction(clip)
-                                    playerData.actions[clip.name] = action
-                                }
-                                // Also populate fishingRodActions for reference if needed
-                                if (!playerData.fishingRodActions) playerData.fishingRodActions = {}
-                                playerData.fishingRodActions[clip.name] = playerData.actions[clip.name]
-                            }
-                        })
-                    }
-
-                }
-
-                // Clear fishing rod reference if hiding
-                if (!showFishingRod && playerData.fishingRodMesh) {
-                    playerData.fishingRodActions = {}
-                    playerData.fishingRodMesh = null
-                }
             }
         })
 
@@ -1641,6 +1614,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
     async function openAdminPanel() {
         if (!adminModal || !adminModalContent) return
         adminModal.style.display = 'block'
+        updateUIVisibility()
         adminModalContent.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">Loading...</div>'
 
         try {
@@ -1656,14 +1630,49 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         }
     }
 
+    let adminActiveTab = 'players' // 'players' or 'analytics'
+
     function renderAdminUserList(users: any[]) {
         if (!adminModalContent) return
         adminModalContent.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid #333;">
-                <h2 style="margin: 0; color: white; font-size: 18px;">Player Administration</h2>
+                <h2 style="margin: 0; color: white; font-size: 18px;">Admin Panel</h2>
                 <button id="admin-close-btn" style="background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer;">×</button>
             </div>
-            <div style="background: #333; border-radius: 12px; padding: 16px; margin: 16px 0;">
+            <!-- Tab Navigation -->
+            <div style="display: flex; border-bottom: 1px solid #333; background: #252525; margin-top: 12px; border-radius: 8px 8px 0 0; overflow: hidden;">
+                <button id="admin-tab-players" style="flex: 1; padding: 14px; background: transparent; border: none; color: ${adminActiveTab === 'players' ? '#4CAF50' : '#888'}; font-weight: ${adminActiveTab === 'players' ? '600' : '400'}; border-bottom: 2px solid ${adminActiveTab === 'players' ? '#4CAF50' : 'transparent'}; cursor: pointer; font-size: 14px;">Players</button>
+                <button id="admin-tab-analytics" style="flex: 1; padding: 14px; background: transparent; border: none; color: ${adminActiveTab === 'analytics' ? '#4CAF50' : '#888'}; font-weight: ${adminActiveTab === 'analytics' ? '600' : '400'}; border-bottom: 2px solid ${adminActiveTab === 'analytics' ? '#4CAF50' : 'transparent'}; cursor: pointer; font-size: 14px;">Analytics</button>
+            </div>
+            <div id="admin-tab-content" style="padding: 16px 0;"></div>
+        `
+
+        document.getElementById('admin-tab-players')?.addEventListener('click', () => {
+            adminActiveTab = 'players'
+            renderAdminUserList(users)
+        })
+        document.getElementById('admin-tab-analytics')?.addEventListener('click', () => {
+            adminActiveTab = 'analytics'
+            renderAdminAnalytics()
+        })
+        document.getElementById('admin-close-btn')?.addEventListener('click', () => {
+            if (adminModal) adminModal.style.display = 'none'
+            updateUIVisibility()
+        })
+
+        if (adminActiveTab === 'players') {
+            renderPlayersTab(users)
+        } else {
+            renderAdminAnalytics()
+        }
+    }
+
+    function renderPlayersTab(users: any[]) {
+        const tabContent = document.getElementById('admin-tab-content')
+        if (!tabContent) return
+
+        tabContent.innerHTML = `
+            <div style="background: #333; border-radius: 12px; padding: 16px; margin-bottom: 16px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
                     <div>
                         <div style="font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 4px;">Game Version</div>
@@ -1676,13 +1685,15 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 </div>
                 <div id="admin-version-msg" style="margin-top: 8px; font-size: 12px; color: #81c784;"></div>
             </div>
-            <div id="admin-user-list" style="display: flex; flex-direction: column; gap: 8px; padding: 0 0 16px 0;"></div>
+            <div id="admin-user-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
         `
+
         // Load current version
         fetch('/api/version').then(r => r.json()).then((data: any) => {
             const input = document.getElementById('admin-version-input') as HTMLInputElement
             if (input) input.value = data.version || ''
         })
+
         // Save version handler
         document.getElementById('admin-version-save')?.addEventListener('click', async () => {
             const input = document.getElementById('admin-version-input') as HTMLInputElement
@@ -1696,7 +1707,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     body: JSON.stringify({ version: input.value })
                 })
                 if (res.ok) {
-                    msgEl.innerText = 'Version updated! Users will be prompted to refresh.'
+                    msgEl.innerText = 'Version updated!'
                     msgEl.style.color = '#81c784'
                 } else {
                     msgEl.innerText = 'Failed to update'
@@ -1707,6 +1718,7 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 msgEl.style.color = '#ef9a9a'
             }
         })
+
         const listEl = document.getElementById('admin-user-list')!
         users.forEach(u => {
             const row = document.createElement('div')
@@ -1722,7 +1734,87 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             row.addEventListener('click', () => loadAdminUserDetails(u.id))
             listEl.appendChild(row)
         })
-        document.getElementById('admin-close-btn')?.addEventListener('click', () => { if (adminModal) adminModal.style.display = 'none' })
+    }
+
+    async function renderAdminAnalytics() {
+        const tabContent = document.getElementById('admin-tab-content')
+        if (!tabContent) return
+
+        tabContent.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">Loading analytics...</div>'
+
+        try {
+            const res = await fetch('/api/admin/analytics')
+            if (!res.ok) {
+                tabContent.innerHTML = '<div style="color: #EF5350; text-align: center; padding: 40px;">Failed to load analytics</div>'
+                return
+            }
+            const data = await res.json() as any
+
+            const formatDuration = (seconds: number) => {
+                const hours = Math.floor(seconds / 3600)
+                const mins = Math.floor((seconds % 3600) / 60)
+                if (hours > 0) return `${hours}h ${mins}m`
+                return `${mins}m`
+            }
+
+            tabContent.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px;">
+                    <div style="background: #333; border-radius: 12px; padding: 12px; text-align: center;">
+                        <div style="font-size: 24px; font-weight: bold; color: #4CAF50;">${data.totalPlayers || 0}</div>
+                        <div style="font-size: 11px; color: #888;">Players</div>
+                    </div>
+                    <div style="background: #333; border-radius: 12px; padding: 12px; text-align: center;">
+                        <div style="font-size: 24px; font-weight: bold; color: #2196F3;">${data.totalSessions || 0}</div>
+                        <div style="font-size: 11px; color: #888;">Sessions</div>
+                    </div>
+                    <div style="background: #333; border-radius: 12px; padding: 12px; text-align: center;">
+                        <div style="font-size: 24px; font-weight: bold; color: #FF9800;">${formatDuration(data.totalPlaytimeSeconds || 0)}</div>
+                        <div style="font-size: 11px; color: #888;">Playtime</div>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px;">
+                    <div style="background: #333; border-radius: 12px; padding: 12px; text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold; color: #f44336;">${data.totalDragonKills || 0}</div>
+                        <div style="font-size: 11px; color: #888;">🐉 Dragon Kills</div>
+                    </div>
+                    <div style="background: #333; border-radius: 12px; padding: 12px; text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold; color: #FFD700;">${data.totalCoinsEarned || 0}</div>
+                        <div style="font-size: 11px; color: #888;">💰 Coins</div>
+                    </div>
+                    <div style="background: #333; border-radius: 12px; padding: 12px; text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold; color: #9C27B0;">${data.totalRealmJoins || 0}</div>
+                        <div style="font-size: 11px; color: #888;">🌀 Realms</div>
+                    </div>
+                </div>
+                <h3 style="color: #ccc; font-size: 14px; margin-bottom: 12px;">🏆 Player Leaderboard</h3>
+                <div id="admin-leaderboard" style="display: flex; flex-direction: column; gap: 8px;"></div>
+            `
+
+            const leaderboard = document.getElementById('admin-leaderboard')!
+            const players = data.playerStats || []
+            players.slice(0, 10).forEach((p: any, i: number) => {
+                const row = document.createElement('div')
+                row.style.cssText = 'background: #333; border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer;'
+                const medalColor = i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : '#555'
+                const textColor = i < 3 ? '#000' : '#fff'
+                row.innerHTML = `
+                    <div style="width: 24px; height: 24px; border-radius: 50%; background: ${medalColor}; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: ${textColor};">${i + 1}</div>
+                    <img src="${p.picture || 'https://via.placeholder.com/32'}" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" />
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; font-size: 13px; color: white;">${p.first_name} ${p.last_name || ''}</div>
+                        <div style="font-size: 11px; color: #888;">${p.total_sessions || 0} sessions • ${formatDuration(p.total_playtime || 0)}</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 14px; font-weight: bold; color: #f44336;">${p.total_dragon_kills || 0} 🐉</div>
+                        <div style="font-size: 11px; color: #FFD700;">+${p.total_coins_earned || 0}</div>
+                    </div>
+                `
+                row.addEventListener('click', () => loadAdminUserDetails(p.user_id))
+                leaderboard.appendChild(row)
+            })
+        } catch (e) {
+            tabContent.innerHTML = '<div style="color: #EF5350; text-align: center; padding: 40px;">Error loading analytics</div>'
+        }
     }
 
     async function loadAdminUserDetails(userId: string) {
@@ -1731,15 +1823,44 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
         try {
             const res = await fetch(`/api/admin/user/${userId}`)
             if (!res.ok) { adminModalContent.innerHTML = '<div style="color: #EF5350;">Error</div>'; return }
-            const data = await res.json() as { user: any }
-            renderAdminUserEdit(data.user)
+            const data = await res.json() as { user: any, stats: any }
+            renderAdminUserEdit(data.user, data.stats)
         } catch (e) {
             adminModalContent.innerHTML = '<div style="color: #EF5350;">Error loading user</div>'
         }
     }
 
-    function renderAdminUserEdit(user: any) {
+    function renderAdminUserEdit(user: any, stats?: any) {
         if (!adminModalContent) return
+
+        const formatDuration = (seconds: number) => {
+            const hours = Math.floor(seconds / 3600)
+            const mins = Math.floor((seconds % 3600) / 60)
+            if (hours > 0) return `${hours}h ${mins}m`
+            return `${mins}m`
+        }
+
+        const statsHtml = stats ? `
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px;">
+                <div style="background: #252525; border-radius: 8px; padding: 8px;">
+                    <div style="font-size: 10px; color: #888;">PLAYTIME</div>
+                    <div style="color: white; font-weight: bold;">${formatDuration(stats.total_playtime || 0)}</div>
+                </div>
+                 <div style="background: #252525; border-radius: 8px; padding: 8px;">
+                    <div style="font-size: 10px; color: #888;">SESSIONS</div>
+                    <div style="color: white; font-weight: bold;">${stats.total_sessions || 0}</div>
+                </div>
+                 <div style="background: #252525; border-radius: 8px; padding: 8px;">
+                    <div style="font-size: 10px; color: #888;">DRAGON KILLS</div>
+                    <div style="color: #f44336; font-weight: bold;">${stats.total_dragon_kills || 0}</div>
+                </div>
+                 <div style="background: #252525; border-radius: 8px; padding: 8px;">
+                    <div style="font-size: 10px; color: #888;">COINS EARNED</div>
+                    <div style="color: #FFD700; font-weight: bold;">${stats.total_coins_earned || 0}</div>
+                </div>
+            </div>
+        ` : ''
+
         adminModalContent.innerHTML = `
             <div style="display: flex; align-items: center; gap: 12px; padding: 16px 0; border-bottom: 1px solid #333;">
                 <button id="admin-back-btn" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">←</button>
@@ -1749,6 +1870,9 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 <div style="font-size: 13px; color: #888; margin-bottom: 4px;">USER ID: ${user.id}</div>
                 <div style="font-size: 20px; font-weight: bold; color: white;">${user.first_name}</div>
                 <div style="color: #aaa;">${user.email || ''}</div>
+                <div style="margin-top: 12px;">
+                    ${statsHtml}
+                </div>
             </div>
             <div style="display: flex; flex-direction: column; gap: 16px;">
                 <div>
@@ -1914,6 +2038,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         me.actionType = 'fishing'
                     }
                 }
+                // Show "Fishing..." button at bottom of screen
+                fishingUI?.showFishingInProgress()
             }
             if (ws && wsConnected) ws.send(JSON.stringify(msg))
         },
@@ -2115,12 +2241,28 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
             // Expose for window helpers
             ; (window as any).updateUIVisibility = updateUIVisibility
 
+        const adminModal = document.getElementById('admin-modal')
         isModalOpen = !!(
             (scoreModal && scoreModal.style.display === 'block') ||
             (invModal && invModal.style.display === 'block') ||
             (shopModal && shopModal.style.display === 'block') ||
-            (rModal && rModal.style.display === 'block')
+            (rModal && rModal.style.display === 'block') ||
+            (adminModal && adminModal.style.display === 'block')
         )
+
+        // Toggle body scrolling when modal is open
+        if (isModalOpen) {
+            document.body.style.overflow = 'auto'
+            document.body.style.overflowY = 'scroll'
+            document.body.style.position = 'static'
+            document.body.style.touchAction = 'auto'
+            document.body.style.setProperty('-webkit-overflow-scrolling', 'touch')
+        } else {
+            document.body.style.overflow = 'hidden'
+            document.body.style.position = 'fixed'
+            document.body.style.touchAction = 'none'
+            document.body.style.setProperty('-webkit-overflow-scrolling', 'auto')
+        }
 
         characterTopBar.style.display = 'none' // Default hidden
 
@@ -2868,16 +3010,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                         if (playerData.isActing) {
                             // Check for fishing action
                             if (playerData.actionType === 'fishing') {
-                                // Default to IDLE if fishing animation is missing, NOT Interact/CharacterSelection
+                                // Default to IDLE if fishing animation is missing
                                 activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || playerData.actions['idle'] || playerData.actions['Idle']
-
-                                // ALSO play fishing rod animation simultaneously (main mixer)
-                                const rodAction = playerData.actions['fishingpole_fishing'] || playerData.actions['Fishingpole_fishing']
-                                if (rodAction && !rodAction.isRunning()) {
-                                    rodAction.setLoop(THREE.LoopOnce, 1)
-                                    rodAction.clampWhenFinished = true
-                                    rodAction.reset().play()
-                                }
                             } else {
                                 // Normal interaction fallback
                                 activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
@@ -2886,13 +3020,17 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                             playerData.mixer.timeScale = 0.5
                         } else {
                             const run = playerData.actions['Run'] || playerData.actions['run']
-                            const walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
+                            // Use walking_staff if player has staff_beginner and not in a realm
+                            const hasRealmRole = playerData.role && playerData.role !== 'None'
+                            let walk = null
+                            if (playerData.weapon === 'staff_beginner' && !hasRealmRole) {
+                                walk = playerData.actions['walking_staff'] || playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
+                            } else {
+                                walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
+                            }
 
                             // All players use idle_noweapon (staff is hidden in realm, and default is idle_noweapon)
                             // Use explicit weapon check for idle state
-                            // REALM FIX: If valid role, force idle_noweapon (hide staff)
-                            const hasRealmRole = playerData.role && playerData.role !== 'None'
-
                             let idle = null
                             if (playerData.weapon === 'staff_beginner' && !hasRealmRole) {
                                 idle = playerData.actions['idle'] || playerData.actions['Idle']
@@ -2901,15 +3039,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                             if (!idle) {
                                 idle = playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle']
                             }
-
-                            // FISHING POLE IDLE: If holding rod but not fishing, play fishingpole_idle
-                            if (playerData.fishingRodMesh && playerData.fishingRodMesh.visible && !playerData.isActing) {
-                                const rodIdle = playerData.actions['fishingpole_idle'] || playerData.actions['Fishingpole_idle']
-                                if (rodIdle && !rodIdle.isRunning()) {
-                                    rodIdle.reset().play()
-                                }
-                            }
-
                             activeAction = (isMoving && (walk || run)) ? (walk || run) : idle
                             playerData.mixer.timeScale = 1.0
                         }
@@ -2951,16 +3080,8 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                 if (playerData.isActing) {
                     // Check for fishing action
                     if (playerData.actionType === 'fishing') {
-                        // Default to IDLE if fishing animation is missing, NOT Interact/CharacterSelection
+                        // Default to IDLE if fishing animation is missing
                         activeAction = playerData.actions['fishing'] || playerData.actions['Fishing'] || playerData.actions['idle'] || playerData.actions['Idle']
-
-                        // ALSO play fishing rod animation simultaneously (main mixer)
-                        const rodAction = playerData.actions['fishingpole_fishing'] || playerData.actions['Fishingpole_fishing']
-                        if (rodAction && !rodAction.isRunning()) {
-                            rodAction.setLoop(THREE.LoopOnce, 1)
-                            rodAction.clampWhenFinished = true
-                            rodAction.reset().play()
-                        }
                     } else {
                         // Normal interaction fallback
                         activeAction = playerData.actions['character_selection'] || playerData.actions['Interact'] || playerData.actions['idle'] || playerData.actions['Idle']
@@ -2969,13 +3090,17 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     playerData.mixer.timeScale = 0.5
                 } else {
                     const run = playerData.actions['Run'] || playerData.actions['run']
-                    const walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
+                    // Use walking_staff if player has staff_beginner and not in a realm
+                    const hasRealmRole = playerData.role && playerData.role !== 'None'
+                    let walk = null
+                    if (playerData.weapon === 'staff_beginner' && !hasRealmRole) {
+                        walk = playerData.actions['walking_staff'] || playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
+                    } else {
+                        walk = playerData.actions['walking'] || playerData.actions['Walk'] || playerData.actions['walk']
+                    }
 
                     // All players use idle_noweapon (staff is hidden in realm, and default is idle_noweapon)
                     // Use explicit weapon check for idle state
-                    // REALM FIX: If valid role, force idle_noweapon (hide staff)
-                    const hasRealmRole = playerData.role && playerData.role !== 'None'
-
                     let idle = null
                     if (playerData.weapon === 'staff_beginner' && !hasRealmRole) {
                         idle = playerData.actions['idle'] || playerData.actions['Idle']
@@ -2984,15 +3109,6 @@ function initGame(THREE: any, LOADERS: { GLTFLoader: any, SkeletonUtils: any }, 
                     if (!idle) {
                         idle = playerData.actions['idle_noweapon'] || playerData.actions['Idle'] || playerData.actions['idle']
                     }
-
-                    // FISHING POLE IDLE: If holding rod but not fishing, play fishingpole_idle
-                    if (playerData.fishingRodMesh && playerData.fishingRodMesh.visible && !playerData.isActing) {
-                        const rodIdle = playerData.actions['fishingpole_idle'] || playerData.actions['Fishingpole_idle']
-                        if (rodIdle && !rodIdle.isRunning()) {
-                            rodIdle.reset().play()
-                        }
-                    }
-
                     activeAction = (hasInput && (walk || run)) ? (walk || run) : idle
                     playerData.mixer.timeScale = 1.0
                 }
