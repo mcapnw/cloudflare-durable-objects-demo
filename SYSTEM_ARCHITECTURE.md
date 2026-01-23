@@ -1,4 +1,4 @@
-# Antigravity Project 1
+# System Architecture
 
 > [!NOTE]
 > This document serves as the **Single Source of Truth** for the Antigravity Project 1 codebase. All future development agents and engineers should consult this file to understand the system's structure, data flow, and architectural patterns.

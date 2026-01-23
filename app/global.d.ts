@@ -22,6 +22,7 @@ declare module 'hono' {
             GOOGLE_CLIENT_ID: string
             GOOGLE_CLIENT_SECRET: string
             DO_SECRET: string
+            GLOBAL_CHAT_NAMESPACE: DurableObjectNamespace
         }
     }
     interface ContextRenderer {

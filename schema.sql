@@ -62,3 +62,11 @@ CREATE TABLE IF NOT EXISTS PendingResearch (
     status TEXT DEFAULT 'pending', -- 'pending', 'completed', 'failed'
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS GlobalChatMessages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    type TEXT NOT NULL, -- 'user' or 'ai'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

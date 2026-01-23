@@ -12,14 +12,25 @@ binding = "DB"
 database_name = "antigravity-db"
 database_id = "f39459bf-f8b2-447b-a454-2262e3dd49b8"
 
+[ai]
+binding = "AI"
+
 [[durable_objects.bindings]]
 name = "GAMEROOM_NAMESPACE"
 class_name = "GameRoomDurableObject"
+
+[[durable_objects.bindings]]
+name = "GLOBAL_CHAT_NAMESPACE"
+class_name = "GlobalChatDO"
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GameRoomDurableObject"]
 
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["GlobalChatDO"]
+
 [triggers]
-crons = ["0 5 * * *", "*/5 * * * *"]
+crons = ["0 5 * * *", "*/5 * * * *", "0 16 * * *"]
 

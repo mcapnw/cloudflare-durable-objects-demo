@@ -23,4 +23,9 @@ name = "GAMEROOM_NAMESPACE"
 class_name = "GameRoomDurableObject"
 script_name = "antigravity-do"
 
+[[durable_objects.bindings]]
+name = "GLOBAL_CHAT_NAMESPACE"
+class_name = "GlobalChatDO"
+script_name = "antigravity-do"
+
 

@@ -1,0 +1,4 @@
+GOOGLE_CLIENT_ID=your_google_client_id_here
+GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+GOOGLE_AI_API_KEY=your_google_ai_api_key_here
+DO_SECRET=your_secret_here

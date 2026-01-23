@@ -1,5 +1,5 @@
 import { jsxRenderer } from 'hono/jsx-renderer'
-import { Script } from 'honox/server'
+import { Script, Link } from 'honox/server'
 
 export default jsxRenderer(({ children, title }) => {
     return (
@@ -15,6 +15,7 @@ export default jsxRenderer(({ children, title }) => {
                 <meta name="theme-color" content="#1a1a2e" />
                 <title>{title}</title>
                 <Script src="/app/client.ts" async />
+                <Link href="/app/style.css" rel="stylesheet" />
                 <style>{`
                     * {
                         margin: 0;

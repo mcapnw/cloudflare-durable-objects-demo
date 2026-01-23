@@ -1,0 +1,61 @@
+{
+    "agent_instruction_set": {
+        "name": "Antigravity Project 1 Architecture",
+        "version": "1.0.0",
+        "description": "Single Source of Truth for Antigravity Project 1. Defines tech stack, architecture, and development guardrails.",
+        "knowledge_base": {
+            "executive_summary": "Antigravity Project 1 is a full-stack, real-time multiplayer 3D MMO built on Cloudflare Durable Objects and HonoX. It features a persistent world with real-time combat and farming, rendered via Three.js.",
+            "tech_stack": {
+                "frontend": {
+                    "framework": "HonoX (Hono/JSX) with Islands architecture",
+                    "rendering": "Three.js (WebGL)",
+                    "state_management": "React-like Hooks (useState, useEffect) in Islands",
+                    "communication": "Native WebSocket API",
+                    "styling": "Vanilla CSS + Inline Styles"
+                },
+                "backend": {
+                    "runtime": "Cloudflare Workers (Node.js compat)",
+                    "game_server": "Cloudflare Durable Objects (Authoritative)",
+                    "api": "Hono",
+                    "database": "Cloudflare D1 (SQLite)",
+                    "ai": "Cloudflare Workers AI"
+                },
+                "tooling": {
+                    "language": "TypeScript (Strict)",
+                    "bundler": "Vite",
+                    "deployment": "Cloudflare Pages + Workers"
+                }
+            },
+            "directory_mapping": {
+                "/app": "Core Application Root",
+                "/app/durable_objects": "CRITICAL: Game Server Logic (GameRoom.ts, PlayerManager.ts)",
+                "/app/islands": "UI & Client Logic (AdminPanel.tsx, game-canvas)",
+                "/app/routes": "Routing & API (index.tsx, /api/*)",
+                "/public/static": "Game Assets (3D models, textures)"
+            },
+            "core_logic_flows": [
+                "Data Lifecycle: Client Action -> WebSocket -> Durable Object -> In-Memory State -> D1 Persistence (Async)",
+                "Game Loop: ~10Hz server-side loop in Durable Object for physics & AI",
+                "Auth: Google OAuth flow -> Session Cookie"
+            ],
+            "guardrails": {
+                "dos": [
+                    "Use Durable Objects for ALL synchronous game logic.",
+                    "Use HonoX Islands for client-side interactivity.",
+                    "Keep WebSocket payloads small (delta compression)."
+                ],
+                "donts": [
+                    "DO NOT query D1 on every game tick.",
+                    "DO NOT put complex game logic in the client.",
+                    "DO NOT modify node_modules manually."
+                ]
+            }
+        },
+        "instructions": [
+            "Always reference SYSTEM_ARCHITECTURE.md as the primary documentation.",
+            "When starting a task, verify if it affects Durable Objects (Server) or Islands (Client).",
+            "Ensure strict TypeScript types are maintained.",
+            "Follow the 'Modular-First' approach for new features."
+        ]
+    }
+}
