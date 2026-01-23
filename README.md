@@ -239,6 +239,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 3D rendering powered by [Three.js](https://threejs.org/)
 - Framework: [HonoX](https://github.com/honojs/honox)
 
----
-
-**Built by Michael** | [Portfolio](https://your-portfolio-site.com) | [LinkedIn](https://linkedin.com/in/yourprofile)
