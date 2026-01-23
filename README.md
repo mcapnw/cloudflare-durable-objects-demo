@@ -1,5 +1,5 @@
 <h1>
-  <img src="./public/static/greeters_logo.png" alt="Greeters" width="400">
+  <img src="./public/static/greeters_logo.png" alt="Greeters" width="200">
 </h1>
 
 
