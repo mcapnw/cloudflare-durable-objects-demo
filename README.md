@@ -1,4 +1,6 @@
-# ![Greeters](./public/static/greeters_logo.png)
+<h1>
+  <img src="./public/static/greeters_logo.png" alt="Greeters" width="400">
+</h1>
 
 
 A real-time mobile multiplayer 3D MMO DEMO running entirely on Cloudflare's edge network. Battle dragons, farm resources, and explore with friends—all powered by Durable Objects for ultra-low latency gameplay.
