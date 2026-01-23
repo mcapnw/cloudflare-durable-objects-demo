@@ -5,7 +5,7 @@
 
 A real-time mobile multiplayer 3D MMO DEMO running entirely on Cloudflare's edge network. Battle dragons, farm resources, and explore with friends—all powered by Durable Objects for ultra-low latency gameplay.
 
-**[🎮 Play Live Mobile Demo](https://antigravity-project-1.pages.dev/)** | [📖 Architecture Docs](./SYSTEM_ARCHITECTURE.md)
+**[🎮 Play Live Mobile Demo](https://antigravity-project-1.pages.dev/)** | [📖 System Architecture](./SYSTEM_ARCHITECTURE.md) | [🏗️ C4 Diagrams](./ARCHITECTURE.md)
 
 ---
 
@@ -63,7 +63,7 @@ This project showcases several advanced patterns:
 4. **Manager Pattern** - Modular game systems (`PlayerManager`, `SheepManager`, `FarmManager`, `DragonManager`)
 5. **Realm Instances** - Dynamic creation of isolated game sessions using Durable Object IDs
 
-See [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) for a deep dive into the technical design.
+See [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) for a deep dive into the technical design, or [ARCHITECTURE.md](./ARCHITECTURE.md) for visual C4 architecture diagrams.
 
 ```mermaid
 graph TD
