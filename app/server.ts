@@ -1,5 +1,6 @@
 import { createApp } from 'honox/server'
-import { getCookie } from 'hono/cookie'
+import { deleteCookie, getCookie } from 'hono/cookie'
+import { parseAndVerifySession } from './lib/session'
 
 export const app = createApp({
     init: (app) => {
@@ -14,7 +15,17 @@ export const app = createApp({
             }
 
             const session = getCookie(c, 'user_session')
-            if (!session) {
+            const { user, invalid } = await parseAndVerifySession({
+                sessionCookie: session,
+                path,
+                secret: c.env.SESSION_SECRET
+            })
+
+            if (!user) {
+                if (invalid) {
+                    deleteCookie(c, 'user_session', { path: '/' })
+                }
+
                 // If it's a WebSocket request, reject
                 if (c.req.header('upgrade') === 'websocket') {
                     return c.text('Unauthorized', 401)
@@ -22,10 +33,7 @@ export const app = createApp({
                 return c.redirect('/login')
             }
 
-            // Make user available in context
-            const user = JSON.parse(session)
             c.set('user', user)
-
             await next()
         })
     }

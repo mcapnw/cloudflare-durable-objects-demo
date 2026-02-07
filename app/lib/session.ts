@@ -142,3 +142,61 @@ export async function verifySession(signedSession: string, secret: string): Prom
         return null
     }
 }
+
+type SessionValidationOptions = {
+    sessionCookie: string | undefined
+    path: string
+    secret?: string
+}
+
+type SessionValidationResult = {
+    user: Record<string, any> | null
+    invalid: boolean
+}
+
+function isValidSessionUser(value: unknown): value is Record<string, any> {
+    if (!value || typeof value !== 'object') {
+        return false
+    }
+
+    const user = value as Record<string, unknown>
+    return typeof user.id === 'string' && user.id.length > 0
+}
+
+/**
+ * Safe session parsing helper that never throws.
+ * Attempts signature verification when a secret is provided and cookie looks signed,
+ * and falls back to plain JSON parsing for unsigned sessions.
+ */
+export async function parseAndVerifySession(options: SessionValidationOptions): Promise<SessionValidationResult> {
+    const { sessionCookie, path, secret } = options
+
+    if (!sessionCookie) {
+        return { user: null, invalid: false }
+    }
+
+    // Signed cookies contain one separator between base64 payload and hex signature.
+    const looksSigned = sessionCookie.includes('.')
+
+    if (looksSigned && secret) {
+        const verifiedUser = await verifySession(sessionCookie, secret)
+        if (isValidSessionUser(verifiedUser)) {
+            return { user: verifiedUser, invalid: false }
+        }
+
+        console.warn(`[session] Invalid signed session for path=${path}`)
+        return { user: null, invalid: true }
+    }
+
+    try {
+        const parsed = JSON.parse(sessionCookie)
+        if (isValidSessionUser(parsed)) {
+            return { user: parsed, invalid: false }
+        }
+    } catch {
+        // Intentionally swallowed: helper must never throw.
+    }
+
+    console.warn(`[session] Invalid session cookie for path=${path}`)
+    return { user: null, invalid: true }
+}

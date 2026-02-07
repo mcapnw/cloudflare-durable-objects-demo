@@ -1,14 +1,23 @@
 import { createRoute } from 'honox/factory'
-import { getCookie, setCookie } from 'hono/cookie'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
+import { parseAndVerifySession } from '../../lib/session'
 
 export const POST = createRoute(async (c) => {
     const session = getCookie(c, 'user_session')
-    if (!session) {
+    const { user, invalid } = await parseAndVerifySession({
+        sessionCookie: session,
+        path: c.req.path,
+        secret: c.env.SESSION_SECRET
+    })
+
+    if (!user) {
+        if (invalid) {
+            deleteCookie(c, 'user_session', { path: '/' })
+        }
         return c.json({ error: 'Unauthorized' }, 401)
     }
 
     const { username, gender, faceIndex } = await c.req.json()
-    const user = JSON.parse(session)
 
     const db = c.env.DB
     if (!db) {
